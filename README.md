@@ -502,7 +502,7 @@ digitalWrite(RL1_PIN, HIGH);  // ON
 
 - 📧 Email: nattapholj@gmail.com
 - 🌐 Website: https://www.facebook.com/thaitechzone
-- 💬 Support: https://github.com/thaitechzone/DEVTHAITECHZONEV2/issues
+- 💬 Support: LINE: thaitechzone
 
 ---
 
