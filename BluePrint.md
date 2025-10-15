@@ -8,7 +8,8 @@ The program is a comprehensive board test application that:
 - Connects to WiFi and displays connection status with RSSI
 - Synchronizes time using NTP servers (Bangkok GMT+7 timezone)
 - Fetches and displays current weather data from OpenWeatherMap API
-- Displays all information on an I2C OLED screen
+- Monitors air quality (PM2.5) using OpenWeatherMap Air Pollution API
+- Displays all information on an I2C OLED screen with optimized layout
 - Supports operation with or without OLED display connected
 - Outputs all status to Serial Monitor for debugging
 
@@ -16,6 +17,9 @@ The program is a comprehensive board test application that:
 - Non-blocking event-driven architecture
 - Active Low configuration for all Relays (RL1-3) and Inputs (SW1-3, ISOIN1-2)
 - OLED display with optimized refresh to prevent flicker
+- Shortened date format (DD/MM/YY) to save display space
+- Combined display of date, temperature, and humidity
+- Air quality monitoring with PM2.5, AQI, and quality description
 - Serial Monitor output every 3 seconds for remote monitoring
 - Graceful degradation when OLED is disconnected
 
@@ -103,6 +107,10 @@ const char* OPENWEATHERMAP_API_KEY = "5285b3436c86bdab46069027fd961d09";
 const char* WEATHER_CITY = "Tha%20Sala,Nakhon%20Si%20Thammarat,TH";
 const char* OWM_HOST = "api.openweathermap.org";
 
+// Air Quality Configuration
+const float NAKHON_SI_THAMMARAT_LAT = 8.4304;   // Latitude
+const float NAKHON_SI_THAMMARAT_LON = 99.9631;  // Longitude
+
 // OLED Configuration
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -137,7 +145,23 @@ struct CurrentWeather {
 };
 ```
 
-5. **Status Variables:**
+5. **Air Quality Data Variables:**
+   - `aqi_update_timer` - Timer for air quality updates
+   - `aqi_update_interval_ms` - Update interval (600000ms = 10 minutes)
+   - `aqi_data_valid` - Boolean flag for valid AQI data
+   - `aqi_status` - String tracking AQI fetch status
+
+6. **Air Quality Data Structure:**
+```cpp
+struct AirQuality {
+  int aqi;           // Air Quality Index (1-5)
+  float pm2_5;       // PM2.5 value
+  float pm10;        // PM10 value
+  String quality;    // Text description (Good, Fair, etc.)
+};
+```
+
+7. **Status Variables:**
    - `oled_available` - Boolean flag for OLED availability
    - `time_synced` - Boolean flag for NTP sync status
    - `wifi_status` - String for WiFi connection status
@@ -160,8 +184,8 @@ The `setup()` function performs initialization in this order:
    - If successful: Display welcome message for 2 seconds
 4. **WiFi Connection:** Call `connectWiFi()` with visual feedback
 5. **NTP Time Sync:** Call `syncNTPTime()` if WiFi connected
-6. **Initial Weather Fetch:** Call `fetchWeatherData()` if WiFi connected
-7. **Initialize Timers:** Set `test_step_timer` and `weather_update_timer`
+6. **Initial Data Fetch:** Call `fetchWeatherData()` and `fetchAirQualityData()` if WiFi connected
+7. **Initialize Timers:** Set `test_step_timer`, `weather_update_timer`, and `aqi_update_timer`
 
 ### f. `loop()` Function
 
@@ -184,9 +208,13 @@ Non-blocking event loop that performs:
    - Check if `weather_update_interval_ms` has elapsed
    - Call `fetchWeatherData()` to refresh weather data
 
-4. **Display Update:** Call `updateOledDisplay()` with current status strings
+4. **Air Quality Data Update:**
+   - Check if `aqi_update_interval_ms` has elapsed
+   - Call `fetchAirQualityData()` to refresh air quality data
 
-5. **Small Delay:** `delay(10)` for stability
+5. **Display Update:** Call `updateOledDisplay()` with current status strings
+
+6. **Small Delay:** `delay(10)` for stability
 
 ### g. Helper Functions
 
@@ -239,6 +267,28 @@ Non-blocking event loop that performs:
 - Update `weather_data_valid` and `weather_status` flags
 - Handle all error conditions with descriptive status messages
 
+#### `fetchAirQualityData()`
+- HTTPS GET request to OpenWeatherMap Air Pollution API 2.5
+- Uses same WiFiClientSecure connection and API key as weather
+- Request URL: `http://api.openweathermap.org/data/2.5/air_pollution?lat={LAT}&lon={LON}&appid={API_KEY}`
+- Parse JSON response to extract:
+  - `pm2_5`: PM2.5 concentration (µg/m³)
+  - `pm10`: PM10 concentration (µg/m³)
+  - `aqi`: Air Quality Index (1-5 scale)
+- Call `getAQIQuality()` to convert AQI to descriptive text
+- Update `aqi_data_valid` and `aqi_status` flags
+- Handle all error conditions with descriptive status messages
+
+#### `getAQIQuality(int aqi)`
+- Convert numeric AQI (1-5) to quality description
+- Return values:
+  - 1 → "Good"
+  - 2 → "Fair"
+  - 3 → "Moderate"
+  - 4 → "Poor"
+  - 5 → "VeryPoor"
+  - default → "Unknown"
+
 #### `updateOledDisplay(String test_item, String wifi_info)`
 - **Serial Monitor Output:**
   - Print formatted status every 3 seconds or when data changes
@@ -249,8 +299,9 @@ Non-blocking event loop that performs:
     Inputs: SW:000 ISO:00
     WiFi: WiFi:-45dBm
     Time: 14:30:25
-    Date: 15/10/2025
+    Date: 16/10/25
     Weather: 28C H75%
+    AirQuality: PM35 AQI2 Fair
     ==================================
     ```
 
@@ -261,8 +312,8 @@ Non-blocking event loop that performs:
   - **Line 2:** Horizontal separator line
   - **Line 3 (Size 1):** Input states "SW:XXX ISO:XX"
   - **Line 4 (Size 1):** WiFi status + current time "WiFi:-45dBm HH:MM:SS"
-  - **Line 5 (Size 1):** Current date "Date: DD/MM/YYYY"
-  - **Line 6 (Size 1):** Weather "28C H75%" or error status "W:Timeout"
+  - **Line 5 (Size 1):** Date + Temperature + Humidity "16/10/25 28C H75%"
+  - **Line 6 (Size 1):** Air Quality "PM35 AQI2 Fair" or error status "AQ:Timeout"
 
 ---
 
@@ -296,6 +347,21 @@ Non-blocking event loop that performs:
 - JSON parsing with error handling
 - 10-minute update interval to respect API rate limits
 - Displays current temperature and humidity only (accurate data)
+
+### Air Quality API Integration
+- HTTPS connection to OpenWeatherMap Air Pollution API 2.5
+- Uses same API key as weather service
+- Location: Nakhon Si Thammarat (8.4304°N, 99.9631°E)
+- 10-minute update interval (synchronized with weather updates)
+- Displays PM2.5, AQI (1-5 scale), and quality description
+- AQI Scale: 1=Good, 2=Fair, 3=Moderate, 4=Poor, 5=VeryPoor
+- Follows WHO Air Quality Guidelines for PM2.5 monitoring
+
+### Display Optimization
+- Date format shortened from "Date: DD/MM/YYYY" to "DD/MM/YY" (saves 9 characters)
+- Line 5 combines date, temperature, and humidity on one line
+- Line 6 dedicated to air quality data (PM2.5 + AQI + description)
+- Efficient use of 128x64 OLED display space
 
 ### Serial Monitor Integration
 - 115200 baud for fast communication

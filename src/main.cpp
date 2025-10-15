@@ -45,6 +45,10 @@ const char* OPENWEATHERMAP_API_KEY = "5285b3436c86bdab46069027fd961d09";
 const char* WEATHER_CITY = "Tha%20Sala,Nakhon%20Si%20Thammarat,TH";
 const char* OWM_HOST = "api.openweathermap.org";
 
+// ===== Air Quality Configuration =====
+const float NAKHON_SI_THAMMARAT_LAT = 8.4304;   // Latitude
+const float NAKHON_SI_THAMMARAT_LON = 99.9631;  // Longitude
+
 // ===== OLED Display Configuration =====
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -76,6 +80,22 @@ struct CurrentWeather {
 
 CurrentWeather current_weather;
 
+// ===== Global Variables for Air Quality =====
+unsigned long aqi_update_timer = 0;
+const unsigned long aqi_update_interval_ms = 600000;  // Update every 10 minutes
+bool aqi_data_valid = false;
+String aqi_status = "Not fetched";  // Track AQI fetch status
+
+// Data structure to hold air quality data
+struct AirQuality {
+  int aqi;           // Air Quality Index (1-5)
+  float pm2_5;       // PM2.5 value
+  float pm10;        // PM10 value
+  String quality;    // Text description (Good, Fair, etc.)
+};
+
+AirQuality air_quality;
+
 // ===== Status Tracking for Display Optimization =====
 String last_test_item = "";
 String last_wifi_status = "";
@@ -96,6 +116,8 @@ String getWiFiStatus();
 void syncNTPTime();
 String getCurrentTime();
 void fetchWeatherData();
+void fetchAirQualityData();
+String getAQIQuality(int aqi);
 
 // ===== Setup Function =====
 void setup() {
@@ -165,12 +187,14 @@ void setup() {
   // 6. Sync Time with NTP Server
   if(WiFi.status() == WL_CONNECTED) {
     syncNTPTime();
-    fetchWeatherData();  // Fetch initial weather data
+    fetchWeatherData();       // Fetch initial weather data
+    fetchAirQualityData();    // Fetch initial air quality data
   }
   
   // Initialize timers
   test_step_timer = millis();
   weather_update_timer = millis();
+  aqi_update_timer = millis();
 }
 
 // ===== Main Loop =====
@@ -202,7 +226,13 @@ void loop() {
     fetchWeatherData();
   }
   
-  // 4. Update OLED Display
+  // 4. Update Air Quality Data periodically
+  if (millis() - aqi_update_timer >= aqi_update_interval_ms) {
+    aqi_update_timer = millis();
+    fetchAirQualityData();
+  }
+  
+  // 5. Update OLED Display
   updateOledDisplay(current_test_name, wifi_info);
   
   // Small delay for stability
@@ -563,6 +593,126 @@ void fetchWeatherData() {
   weather_status = "OK";
 }
 
+// ===== Helper Function: Fetch Air Quality Data =====
+void fetchAirQualityData() {
+  if (WiFi.status() != WL_CONNECTED) {
+    aqi_status = "No WiFi";
+    aqi_data_valid = false;
+    return;
+  }
+
+  aqi_status = "Connecting...";
+  
+  WiFiClientSecure client;
+  client.setInsecure();
+
+  if (!client.connect(OWM_HOST, 443)) {
+    aqi_status = "Connect fail";
+    aqi_data_valid = false;
+    return;
+  }
+
+  aqi_status = "Requesting...";
+  
+  // Using Air Pollution API with coordinates
+  String url = String("/data/2.5/air_pollution?lat=") + String(NAKHON_SI_THAMMARAT_LAT, 4) +
+               "&lon=" + String(NAKHON_SI_THAMMARAT_LON, 4) +
+               "&appid=" + OPENWEATHERMAP_API_KEY;
+
+  // Send HTTP GET request
+  client.print(String("GET ") + url + " HTTP/1.1\r\n" +
+               "Host: " + OWM_HOST + "\r\n" +
+               "User-Agent: ESP32\r\n" +
+               "Accept: application/json\r\n" +
+               "Connection: close\r\n\r\n");
+
+  // Wait for response with timeout
+  unsigned long timeout = millis();
+  while (client.connected() && !client.available()) {
+    if (millis() - timeout > 10000) {
+      aqi_status = "Timeout";
+      aqi_data_valid = false;
+      client.stop();
+      return;
+    }
+    delay(10);
+  }
+
+  aqi_status = "Reading...";
+
+  // Read HTTP status line
+  String status_line = client.readStringUntil('\n');
+  if (status_line.indexOf("200") == -1) {
+    aqi_status = "HTTP " + status_line.substring(9, 12);
+    aqi_data_valid = false;
+    client.stop();
+    return;
+  }
+
+  // Skip remaining HTTP headers
+  while (client.connected() || client.available()) {
+    String line = client.readStringUntil('\n');
+    if (line == "\r" || line.length() == 0) {
+      break;  // Empty line means headers are done
+    }
+  }
+
+  aqi_status = "Parsing...";
+  
+  // Now read the JSON body
+  String json_body = "";
+  while (client.available()) {
+    json_body += client.readString();
+  }
+  
+  client.stop();
+
+  if (json_body.length() == 0) {
+    aqi_status = "Empty resp";
+    aqi_data_valid = false;
+    return;
+  }
+
+  // Use ArduinoJson to parse the response
+  DynamicJsonDocument doc(2048);
+  DeserializationError error = deserializeJson(doc, json_body);
+
+  if (error) {
+    aqi_status = "Parse err";
+    aqi_data_valid = false;
+    return;
+  }
+
+  // Check if we got valid data
+  if (!doc.containsKey("list") || doc["list"].size() == 0) {
+    aqi_status = "No data";
+    aqi_data_valid = false;
+    return;
+  }
+
+  // Extract air quality data
+  air_quality.aqi = doc["list"][0]["main"]["aqi"].as<int>();
+  air_quality.pm2_5 = doc["list"][0]["components"]["pm2_5"].as<float>();
+  air_quality.pm10 = doc["list"][0]["components"]["pm10"].as<float>();
+  air_quality.quality = getAQIQuality(air_quality.aqi);
+
+  aqi_data_valid = true;
+  aqi_status = "OK";
+}
+
+// ===== Helper Function: Get AQI Quality Description =====
+String getAQIQuality(int aqi) {
+  // Based on OpenWeatherMap AQI scale (1-5)
+  switch(aqi) {
+    case 1: return "Good";
+    case 2: return "Fair";
+    case 3: return "Moderate";
+    case 4: return "Poor";
+    case 5: return "VeryPoor";
+    default: return "Unknown";
+  }
+}
+
 // ===== Helper Function: Update OLED Display =====
 void updateOledDisplay(String test_item, String wifi_info) {
   static unsigned long last_update = 0;
@@ -607,6 +757,14 @@ void updateOledDisplay(String test_item, String wifi_info) {
       Serial.print("Weather: ");
       Serial.println(weather_status);
     }
+    
+    if (aqi_data_valid) {
+      Serial.printf("AirQuality: PM2.5=%.1f AQI=%d (%s)\n", 
+                    air_quality.pm2_5, air_quality.aqi, air_quality.quality.c_str());
+    } else {
+      Serial.print("AirQuality: ");
+      Serial.println(aqi_status);
+    }
     Serial.println("==================================\n");
   }
   
@@ -650,30 +808,44 @@ void updateOledDisplay(String test_item, String wifi_info) {
     display.print(getCurrentTime());
   }
   
-  // Line 5: Current Date
+  // Line 5: Date, Temperature and Humidity
   display.setCursor(0, 42);
   if(time_synced) {
     struct tm timeinfo;
     if(getLocalTime(&timeinfo)) {
-      display.printf("Date: %02d/%02d/%04d", 
+      display.printf("%02d/%02d/%02d", 
                      timeinfo.tm_mday, 
                      timeinfo.tm_mon + 1, 
-                     timeinfo.tm_year + 1900);
+                     (timeinfo.tm_year + 1900) % 100);
+      
+      // Add weather data on same line if available
+      if(weather_data_valid) {
+        display.printf(" %dC H%d%%",
+            current_weather.temp_current, 
+            current_weather.humidity);
+      }
     }
   } else {
     display.print("Time not synced");
   }
   
-  // Line 6: Weather Current Data
+  // Line 6: Air Quality Data with description
   display.setCursor(0, 52);
-  if (weather_data_valid) {
+  if (aqi_data_valid) {
+    // Show PM2.5, AQI and quality description
+    display.printf("PM%.0f AQI%d %s",
+        air_quality.pm2_5,
+        air_quality.aqi,
+        air_quality.quality.c_str());
+  } else if (weather_data_valid && !time_synced) {
+    // Fallback: show weather if no time sync (shouldn't normally happen)
     display.printf("%dC H%d%%",
         current_weather.temp_current, 
         current_weather.humidity);
   } else {
-    // Show weather status for debugging
-    display.print("W:");
-    display.print(weather_status);
+    // Show error status
+    display.print("AQI:");
+    display.print(aqi_status);
   }
   
   // Update display
