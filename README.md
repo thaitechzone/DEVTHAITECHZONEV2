@@ -31,6 +31,7 @@
 - ✅ **เชื่อมต่อ WiFi** - แสดงสถานะและความแรงสัญญาณ (RSSI)
 - ✅ **ซิงค์เวลาจาก NTP** - เวลาแม่นยำจาก Internet (GMT+7 กรุงเทพฯ)
 - ✅ **ข้อมูลสภาพอากาศ** - อุณหภูมิและความชื้นปัจจุบันจาก OpenWeatherMap
+- ✅ **ตรวจสอบคุณภาพอากาศ (PM2.5)** - ค่า PM2.5, AQI และระดับคุณภาพอากาศ
 - ✅ **แสดงผลบน OLED** - จอ 128x64 แสดงข้อมูลแบบ Real-time
 - ✅ **ทำงานต่อได้แม้ OLED หลุด** - โปรแกรมไม่หยุดทำงานถ้าจอไม่ต่อ
 - ✅ **Serial Monitor** - แสดงสถานะทุก 3 วินาทีสำหรับ Debug
@@ -139,16 +140,29 @@ const char* WIFI_PASSWORD = "รหัสผ่าน_WiFi";
 2. สมัครสมาชิก (ฟรี)
 3. ไปที่ API Keys และคัดลอก Key
 
-**แก้ไขในโค้ด** (บรรทัดที่ ~41-42):
+**แก้ไขในโค้ด** (บรรทัดที่ ~43-44):
 
 ```cpp
 const char* OPENWEATHERMAP_API_KEY = "API_KEY_ของคุณ";
 const char* WEATHER_CITY = "เมือง,จังหวัด,TH";  // ตัวอย่าง: "Bangkok,Bangkok,TH"
 ```
 
-### 3. ตั้งค่า Timezone (ถ้าต้องการเปลี่ยน)
+### 3. ตั้งค่า Air Quality Location (ตัวเลือก)
 
-แก้ไขในไฟล์ `src/main.cpp` (บรรทัดที่ ~38):
+**แก้ไขพิกัด GPS สำหรับตรวจสอบคุณภาพอากาศ** (บรรทัดที่ ~47-48):
+
+```cpp
+const float NAKHON_SI_THAMMARAT_LAT = 8.4304;   // Latitude
+const float NAKHON_SI_THAMMARAT_LON = 99.9631;  // Longitude
+```
+
+**หาพิกัดของคุณ:**
+- ใช้ Google Maps → คลิกขวาที่ตำแหน่ง → คัดลอกพิกัด
+- API Key เดียวกับ Weather API (ไม่ต้องสมัครเพิ่ม)
+
+### 4. ตั้งค่า Timezone (ถ้าต้องการเปลี่ยน)
+
+แก้ไขในไฟล์ `src/main.cpp` (บรรทัดที่ ~40):
 
 ```cpp
 const long GMT_OFFSET_SEC = 7 * 3600;  // GMT+7 สำหรับประเทศไทย
@@ -218,8 +232,8 @@ pio device monitor
 ──────────────────
 SW:000 ISO:00
 WiFi:-45dBm 14:30:25
-Date: 15/10/2025
-28C H75%
+16/10/25 28C H75%
+PM35 AQI2 Fair
 ```
 
 **บน Serial Monitor:**
@@ -229,8 +243,9 @@ Test: -> RELAY 1
 Inputs: SW:000 ISO:00
 WiFi: WiFi:-45dBm
 Time: 14:30:25
-Date: 15/10/2025
+Date: 16/10/2025
 Weather: 28C H75%
+AirQuality: PM2.5=35.2 AQI=2 (Fair)
 ==================================
 ```
 
@@ -299,7 +314,8 @@ bool time_synced = false;
 1. เรียก `runTestCycle()` - ทดสอบ Output
 2. อัปเดตสถานะ WiFi
 3. อัปเดตข้อมูลสภาพอากาศ (ทุก 10 นาที)
-4. อัปเดต Display
+4. อัปเดตข้อมูลคุณภาพอากาศ (ทุก 10 นาที)
+5. อัปเดต Display
 
 #### **runTestCycle()**
 วนทดสอบ Output ทุก 1.5 วินาที:
@@ -326,11 +342,28 @@ bool time_synced = false;
 - เก็บอุณหภูมิและความชื้นปัจจุบัน
 - อัปเดตทุก 10 นาที
 
+#### **fetchAirQualityData()**
+ดึงข้อมูลคุณภาพอากาศ:
+- เชื่อมต่อ HTTPS กับ OpenWeatherMap Air Pollution API
+- ดึงข้อมูล PM2.5, PM10 และ AQI
+- แปลงค่า AQI เป็นคำอธิบาย (Good, Fair, Moderate, Poor, VeryPoor)
+- อัปเดตทุก 10 นาที
+
+#### **getAQIQuality()**
+แปลงค่า AQI เป็นคำอธิบาย:
+- AQI 1 = Good (ดี)
+- AQI 2 = Fair (ปานกลาง)
+- AQI 3 = Moderate (พอใช้)
+- AQI 4 = Poor (แย่)
+- AQI 5 = VeryPoor (แย่มาก)
+
 #### **updateOledDisplay()**
 แสดงผลบน OLED และ Serial:
 - แสดงบน Serial ทุก 3 วินาที
 - แสดงบน OLED ทุก 1 วินาที (สำหรับเวลา)
 - อัปเดตเมื่อข้อมูลเปลี่ยนเท่านั้น (ป้องกันกะพริบ)
+- บรรทัดที่ 5: วันที่ (ย่อ) + อุณหภูมิ + ความชื้น
+- บรรทัดที่ 6: PM2.5 + AQI + คำอธิบาย
 
 ### Active Low Configuration
 
@@ -408,6 +441,15 @@ digitalWrite(RL1_PIN, HIGH);  // ON
 - ตรวจสอบ Driver CP2102/CH340 ติดตั้งแล้ว
 - ลอง Upload อีกครั้ง
 
+#### 7. **Air Quality API ไม่แสดงข้อมูล**
+
+**วิธีแก้:**
+- ตรวจสอบ API Key ถูกต้อง (ใช้ Key เดียวกับ Weather)
+- ตรวจสอบพิกัด GPS ถูกต้อง
+- รอ 10 นาทีสำหรับการอัปเดตข้อมูล
+- ตรวจสอบใน Serial Monitor ว่ามี Error อะไร
+- ดูสถานะ: "AQI:Connecting...", "AQI:Timeout", etc.
+
 ---
 
 ## 📊 ตัวอย่างการใช้งาน
@@ -418,11 +460,11 @@ digitalWrite(RL1_PIN, HIGH);  // ON
 - สังเกตการทำงานของ LED และ Display
 - ทดสอบกด Switch ดูการเปลี่ยนแปลงบน Display
 
-### กรณีที่ 2: ทดสอบพร้อม WiFi
-- ตั้งค่า WiFi ให้ถูกต้อง
+### กรณีที่ 2: ทดสอบพร้อม WiFi + Weather + Air Quality
+- ตั้งค่า WiFi และ API Key ให้ถูกต้อง
 - Upload โปรแกรม
-- ดูเวลาและ Weather บน Display
-- ตรวจสอบ Serial Monitor เพื่อดูรายละเอียด
+- ดูเวลา, อุณหภูมิ, ความชื้น และ PM2.5 บน Display
+- ตรวจสอบ Serial Monitor เพื่อดูรายละเอียดครบถ้วน
 
 ### กรณีที่ 3: ใช้งานจริงกับ Relay
 - ต่อ Relay Module กับ RL1, RL2, RL3
@@ -436,6 +478,14 @@ digitalWrite(RL1_PIN, HIGH);  // ON
 - LED จะกระพริบ 3 ครั้ง
 - เปิด Serial Monitor เพื่อดูสถานะ
 - โปรแกรมจะทำงานต่อได้ปกติ
+
+### กรณีที่ 5: ตรวจสอบคุณภาพอากาศ
+- ดูค่า PM2.5 บน Display หรือ Serial Monitor
+- เปรียบเทียบกับมาตรฐาน WHO:
+  - PM2.5 < 12 µg/m³ = ดี
+  - PM2.5 12-35 µg/m³ = ปานกลาง
+  - PM2.5 35-55 µg/m³ = ไม่ดีต่อสุขภาพกลุ่มเสี่ยง
+  - PM2.5 > 55 µg/m³ = ไม่ดีต่อสุขภาพ
 
 ---
 
@@ -474,7 +524,15 @@ digitalWrite(RL1_PIN, HIGH);  // ON
 
 ## 📝 Changelog
 
-### Version 2.0 (Current)
+### Version 2.1 (Development - Current)
+- ✅ เพิ่ม Air Quality (PM2.5) monitoring
+- ✅ เพิ่ม OpenWeatherMap Air Pollution API
+- ✅ แสดง PM2.5, AQI และระดับคุณภาพอากาศ
+- ✅ ย่อรูปแบบวันที่เป็น DD/MM/YY
+- ✅ รวมวันที่ + อุณหภูมิ + ความชื้น ในบรรทัดเดียว
+- ✅ แสดงคุณภาพอากาศพร้อมคำอธิบาย
+
+### Version 2.0
 - ✅ เพิ่ม WiFi connectivity
 - ✅ เพิ่ม NTP time synchronization
 - ✅ เพิ่ม Weather API integration
