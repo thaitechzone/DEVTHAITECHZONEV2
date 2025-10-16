@@ -1,0 +1,115 @@
+{
+  "title": "ESP32 ThaiTechZone V2 Dashboard",
+  "image": null,
+  "mobileHide": false,
+  "mobileOrder": null,
+  "configuration": {
+    "description": "Complete IoT Control Dashboard",
+    "widgets": {},
+    "states": {
+      "default": {
+        "name": "ESP32 Control Panel",
+        "root": true,
+        "layouts": {
+          "main": {
+            "widgets": {
+              "widget_system_status": {
+                "sizeX": 8,
+                "sizeY": 4,
+                "row": 0,
+                "col": 0
+              },
+              "widget_temp_humidity": {
+                "sizeX": 10,
+                "sizeY": 6,
+                "row": 0,
+                "col": 8
+              },
+              "widget_pm25_gauge": {
+                "sizeX": 6,
+                "sizeY": 6,
+                "row": 0,
+                "col": 18
+              },
+              "widget_mode_control": {
+                "sizeX": 6,
+                "sizeY": 3,
+                "row": 4,
+                "col": 0
+              },
+              "widget_relay_status": {
+                "sizeX": 18,
+                "sizeY": 4,
+                "row": 6,
+                "col": 0
+              },
+              "widget_input_status": {
+                "sizeX": 6,
+                "sizeY": 4,
+                "row": 6,
+                "col": 18
+              },
+              "widget_emergency": {
+                "sizeX": 6,
+                "sizeY": 3,
+                "row": 4,
+                "col": 6
+              }
+            },
+            "gridSettings": {
+              "backgroundColor": "#eeeeee",
+              "columns": 24,
+              "margin": 10,
+              "outerMargin": true,
+              "backgroundSizeMode": "100%"
+            }
+          }
+        }
+      }
+    },
+    "entityAliases": {
+      "device_alias": {
+        "id": "device_alias_id",
+        "alias": "ESP32 Device",
+        "filter": {
+          "type": "singleEntity",
+          "resolveMultiple": false,
+          "singleEntity": {
+            "entityType": "DEVICE",
+            "id": null
+          }
+        }
+      }
+    },
+    "filters": {},
+    "timewindow": {
+      "displayValue": "",
+      "hideInterval": false,
+      "hideLastInterval": false,
+      "hideQuickInterval": false,
+      "hideAggregation": false,
+      "hideAggInterval": false,
+      "hideTimezone": false,
+      "selectedTab": 0,
+      "realtime": {
+        "realtimeType": 1,
+        "interval": 1000,
+        "timewindowMs": 60000,
+        "quickInterval": "CURRENT_DAY"
+      },
+      "aggregation": {
+        "type": "AVG",
+        "limit": 25000
+      }
+    },
+    "settings": {
+      "stateControllerId": "entity",
+      "showTitle": true,
+      "showDashboardsSelect": true,
+      "showEntitiesSelect": true,
+      "showDashboardTimewindow": true,
+      "showDashboardExport": true,
+      "toolbarAlwaysOpen": true
+    }
+  }
+}

@@ -139,7 +139,7 @@ bool mqtt_connected = false;
 unsigned long mqtt_reconnect_timer = 0;
 const unsigned long mqtt_reconnect_interval = 5000;
 unsigned long mqtt_publish_timer = 0;
-const unsigned long mqtt_publish_interval = 10000;  // Publish status every 10 seconds (ลดลง)
+const unsigned long mqtt_publish_interval = 2000;  // Publish status every 2 seconds (เร็วขึ้น)
 unsigned long last_debug_print = 0;
 const unsigned long debug_print_interval = 10000;  // Debug print every 10 seconds
 

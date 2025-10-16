@@ -517,19 +517,13 @@
               "dataKeys": [
                 {
                   "name": "temperature",
-                  "type": "timeseries"
+                  "type": "timeseries",
+                  "label": "Temperature"
                 },
                 {
                   "name": "humidity",
-                  "type": "timeseries"
-                },
-                {
-                  "name": "weather_city",
-                  "type": "timeseries"
-                },
-                {
-                  "name": "weather_description",
-                  "type": "timeseries"
+                  "type": "timeseries",
+                  "label": "Humidity"
                 }
               ]
             }
@@ -542,7 +536,7 @@
           "showTitle": true,
           "title": "Weather Information",
           "settings": {
-            "cardHtml": "<div style=\"text-align:center;padding:20px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;border-radius:8px;\">\n  <h1 style=\"margin:0;font-size:48px;\">${temperature}°C</h1>\n  <p style=\"margin:10px 0;font-size:18px;\">Humidity: ${humidity}%</p>\n  <p style=\"margin:5px 0;font-size:14px;\">${weather_city}</p>\n  <p style=\"margin:5px 0;font-size:14px;\">${weather_description}</p>\n</div>"
+            "cardHtml": "<div style=\"text-align:center;padding:20px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;border-radius:8px;\">\n  <div style=\"font-size:64px;margin:10px 0;\">🌡️</div>\n  <h1 style=\"margin:0;font-size:48px;\">${temperature}°C</h1>\n  <div style=\"font-size:32px;margin:10px 0;\">💧</div>\n  <p style=\"margin:10px 0;font-size:24px;\">Humidity: ${humidity}%</p>\n  <p style=\"margin:10px 0;font-size:12px;opacity:0.8;\">Updated every 10 minutes</p>\n</div>"
           }
         }
       },
@@ -562,15 +556,13 @@
               "dataKeys": [
                 {
                   "name": "aqi",
-                  "type": "timeseries"
-                },
-                {
-                  "name": "air_quality",
-                  "type": "timeseries"
+                  "type": "timeseries",
+                  "label": "AQI"
                 },
                 {
                   "name": "pm2_5",
-                  "type": "timeseries"
+                  "type": "timeseries",
+                  "label": "PM2.5"
                 }
               ]
             }
@@ -583,7 +575,7 @@
           "showTitle": true,
           "title": "Air Quality Index",
           "settings": {
-            "cardHtml": "<div style=\"text-align:center;padding:20px;border-radius:8px;\">\n  <h1 style=\"margin:0;font-size:64px;color:#4CAF50;\">${aqi}</h1>\n  <p style=\"margin:10px 0;font-size:24px;font-weight:bold;\">${air_quality}</p>\n  <p style=\"margin:5px 0;font-size:14px;color:#666;\">PM2.5: ${pm2_5} µg/m³</p>\n</div>"
+            "cardHtml": "<div style=\"text-align:center;padding:20px;border-radius:8px;\">\n  <div style=\"font-size:48px;margin:10px 0;\">💨</div>\n  <h1 style=\"margin:0;font-size:64px;color:#4CAF50;\">${aqi}</h1>\n  <p style=\"margin:10px 0;font-size:16px;font-weight:bold;\">Air Quality Index</p>\n  <div style=\"margin-top:15px;padding:10px;background:#f5f5f5;border-radius:5px;\">\n    <p style=\"margin:5px 0;font-size:14px;color:#666;\">PM2.5: ${pm2_5} µg/m³</p>\n  </div>\n  <p style=\"margin:10px 0;font-size:12px;opacity:0.6;\">1=Good, 2=Fair, 3=Moderate, 4=Poor, 5=VeryPoor</p>\n</div>"
           }
         }
       },
