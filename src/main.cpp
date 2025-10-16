@@ -30,8 +30,12 @@
 #define AUX3_PIN 14
 #define AUX4_PIN 15
 
+// // ===== WiFi Configuration =====
+// const char* WIFI_SSID = "myHome_2.4GHz";
+// const char* WIFI_PASSWORD = "0939391546";
+
 // ===== WiFi Configuration =====
-const char* WIFI_SSID = "myHome_2.4GHz";
+const char* WIFI_SSID = "Somporn-2.4GHz";
 const char* WIFI_PASSWORD = "0939391546";
 
 // ===== MQTT Configuration (ThingsBoard) =====
