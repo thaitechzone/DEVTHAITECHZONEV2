@@ -1,0 +1,675 @@
+{
+  "title": "ESP32 ThaiTechZone V2 - Control Panel",
+  "configuration": {
+    "description": "Complete IoT Control Dashboard with Monitoring and Control",
+    "widgets": {
+      "system_status": {
+        "typeFullFqn": "system.cards.simple_card",
+        "type": "latest",
+        "sizeX": 6,
+        "sizeY": 6,
+        "row": 0,
+        "col": 0,
+        "config": {
+          "datasources": [
+            {
+              "type": "entity",
+              "name": "ESP32",
+              "entityAliasId": "esp32_device",
+              "dataKeys": [
+                {
+                  "name": "uptime",
+                  "type": "timeseries",
+                  "label": "Uptime",
+                  "color": "#2196F3",
+                  "settings": {},
+                  "units": "sec",
+                  "decimals": 0
+                },
+                {
+                  "name": "mode",
+                  "type": "timeseries",
+                  "label": "Mode",
+                  "color": "#4CAF50"
+                },
+                {
+                  "name": "wifi_rssi",
+                  "type": "timeseries",
+                  "label": "WiFi Signal",
+                  "color": "#FF9800",
+                  "units": "dBm"
+                },
+                {
+                  "name": "free_heap",
+                  "type": "timeseries",
+                  "label": "Free RAM",
+                  "color": "#9C27B0",
+                  "units": "bytes"
+                }
+              ]
+            }
+          ],
+          "timewindow": {
+            "realtime": {
+              "timewindowMs": 60000
+            }
+          },
+          "showTitle": true,
+          "title": "System Status",
+          "dropShadow": true,
+          "enableFullscreen": false,
+          "titleStyle": {
+            "fontSize": "16px",
+            "fontWeight": 400
+          },
+          "widgetStyle": {},
+          "cardButtons": [],
+          "borderRadius": "4px",
+          "padding": "16px"
+        }
+      },
+      "temperature_humidity_chart": {
+        "typeFullFqn": "system.charts.basic_timeseries",
+        "type": "timeseries",
+        "sizeX": 12,
+        "sizeY": 8,
+        "row": 0,
+        "col": 6,
+        "config": {
+          "datasources": [
+            {
+              "type": "entity",
+              "name": "Sensors",
+              "entityAliasId": "esp32_device",
+              "dataKeys": [
+                {
+                  "name": "temperature",
+                  "type": "timeseries",
+                  "label": "Temperature",
+                  "color": "#FF5722",
+                  "settings": {
+                    "showLines": true,
+                    "fillLines": false,
+                    "showPoints": false
+                  },
+                  "units": "°C",
+                  "decimals": 1
+                },
+                {
+                  "name": "humidity",
+                  "type": "timeseries",
+                  "label": "Humidity",
+                  "color": "#2196F3",
+                  "settings": {
+                    "showLines": true,
+                    "fillLines": false,
+                    "showPoints": false
+                  },
+                  "units": "%",
+                  "decimals": 1
+                }
+              ]
+            }
+          ],
+          "timewindow": {
+            "realtime": {
+              "timewindowMs": 3600000
+            }
+          },
+          "showTitle": true,
+          "title": "Temperature & Humidity History",
+          "showLegend": true,
+          "settings": {
+            "xaxis": {
+              "showLabels": true,
+              "title": null
+            },
+            "yaxis": {
+              "min": 0,
+              "max": 100,
+              "showLabels": true,
+              "title": null
+            },
+            "grid": {
+              "verticalLines": true,
+              "horizontalLines": true,
+              "outlineWidth": 1
+            }
+          }
+        }
+      },
+      "pm25_gauge": {
+        "typeFullFqn": "system.charts.radial_gauge",
+        "type": "latest",
+        "sizeX": 6,
+        "sizeY": 6,
+        "row": 0,
+        "col": 18,
+        "config": {
+          "datasources": [
+            {
+              "type": "entity",
+              "name": "Air Quality",
+              "entityAliasId": "esp32_device",
+              "dataKeys": [
+                {
+                  "name": "pm2_5",
+                  "type": "timeseries",
+                  "label": "PM2.5",
+                  "color": "#4CAF50",
+                  "units": "µg/m³",
+                  "decimals": 1
+                }
+              ]
+            }
+          ],
+          "timewindow": {
+            "realtime": {
+              "timewindowMs": 60000
+            }
+          },
+          "showTitle": true,
+          "title": "PM2.5 Air Quality",
+          "settings": {
+            "minValue": 0,
+            "maxValue": 100,
+            "startAngle": 45,
+            "ticksAngle": 270,
+            "needleCircleSize": 10,
+            "animation": true,
+            "animationDuration": 500,
+            "animationRule": "linear",
+            "defaultColor": "#4CAF50",
+            "colorPlate": "#fff",
+            "colorMajorTicks": "#444",
+            "colorMinorTicks": "#666",
+            "colorTitle": "#888",
+            "colorUnits": "#888",
+            "colorNumbers": "#444",
+            "colorNeedle": "#dd0000",
+            "colorNeedleEnd": "#dd0000",
+            "majorTicks": [
+              "0",
+              "12",
+              "35",
+              "55",
+              "75",
+              "100"
+            ],
+            "minorTicks": 2,
+            "highlights": [
+              {
+                "from": 0,
+                "to": 12,
+                "color": "#4CAF50"
+              },
+              {
+                "from": 12,
+                "to": 35,
+                "color": "#FFEB3B"
+              },
+              {
+                "from": 35,
+                "to": 55,
+                "color": "#FF9800"
+              },
+              {
+                "from": 55,
+                "to": 100,
+                "color": "#F44336"
+              }
+            ]
+          }
+        }
+      },
+      "mode_control": {
+        "typeFullFqn": "system.control_widgets.switch_control",
+        "type": "rpc",
+        "sizeX": 4,
+        "sizeY": 3,
+        "row": 6,
+        "col": 0,
+        "config": {
+          "targetDeviceAliasIds": ["esp32_device"],
+          "showTitle": true,
+          "title": "Mode Control",
+          "getValueMethod": "getValue",
+          "setValueMethod": "setMode",
+          "requestTimeout": 500,
+          "retrieveValueMethod": "getValue",
+          "valueKey": "mode",
+          "parseValueFunction": "return value === 'manual';",
+          "convertValueFunction": "return value ? 'manual' : 'auto';",
+          "requestPersistent": false,
+          "persistentPollingInterval": 5000,
+          "settings": {
+            "initialState": false,
+            "onUpdateState": "return value === 'manual';",
+            "switchLabelOn": "MANUAL",
+            "switchLabelOff": "AUTO",
+            "switchColorOn": "#FF9800",
+            "switchColorOff": "#2196F3"
+          }
+        }
+      },
+      "relay1_switch": {
+        "typeFullFqn": "system.control_widgets.switch_control",
+        "type": "rpc",
+        "sizeX": 4,
+        "sizeY": 3,
+        "row": 6,
+        "col": 4,
+        "config": {
+          "targetDeviceAliasIds": ["esp32_device"],
+          "showTitle": true,
+          "title": "Relay 1",
+          "getValueMethod": "getValue",
+          "setValueMethod": "setRelay",
+          "valueKey": "relay1",
+          "requestTimeout": 500,
+          "settings": {
+            "initialState": false,
+            "switchLabelOn": "ON",
+            "switchLabelOff": "OFF",
+            "switchColorOn": "#4CAF50",
+            "switchColorOff": "#9E9E9E",
+            "requestBody": {
+              "relay": 1,
+              "state": true
+            },
+            "requestBodyOff": {
+              "relay": 1,
+              "state": false
+            }
+          }
+        }
+      },
+      "relay2_switch": {
+        "typeFullFqn": "system.control_widgets.switch_control",
+        "type": "rpc",
+        "sizeX": 4,
+        "sizeY": 3,
+        "row": 6,
+        "col": 8,
+        "config": {
+          "targetDeviceAliasIds": ["esp32_device"],
+          "showTitle": true,
+          "title": "Relay 2",
+          "getValueMethod": "getValue",
+          "setValueMethod": "setRelay",
+          "valueKey": "relay2",
+          "requestTimeout": 500,
+          "settings": {
+            "initialState": false,
+            "switchLabelOn": "ON",
+            "switchLabelOff": "OFF",
+            "switchColorOn": "#4CAF50",
+            "switchColorOff": "#9E9E9E",
+            "requestBody": {
+              "relay": 2,
+              "state": true
+            },
+            "requestBodyOff": {
+              "relay": 2,
+              "state": false
+            }
+          }
+        }
+      },
+      "relay3_switch": {
+        "typeFullFqn": "system.control_widgets.switch_control",
+        "type": "rpc",
+        "sizeX": 4,
+        "sizeY": 3,
+        "row": 6,
+        "col": 12,
+        "config": {
+          "targetDeviceAliasIds": ["esp32_device"],
+          "showTitle": true,
+          "title": "Relay 3",
+          "getValueMethod": "getValue",
+          "setValueMethod": "setRelay",
+          "valueKey": "relay3",
+          "requestTimeout": 500,
+          "settings": {
+            "initialState": false,
+            "switchLabelOn": "ON",
+            "switchLabelOff": "OFF",
+            "switchColorOn": "#4CAF50",
+            "switchColorOff": "#9E9E9E",
+            "requestBody": {
+              "relay": 3,
+              "state": true
+            },
+            "requestBodyOff": {
+              "relay": 3,
+              "state": false
+            }
+          }
+        }
+      },
+      "aux_controls": {
+        "typeFullFqn": "system.control_widgets.rpc_button_row",
+        "type": "rpc",
+        "sizeX": 8,
+        "sizeY": 4,
+        "row": 9,
+        "col": 0,
+        "config": {
+          "targetDeviceAliasIds": ["esp32_device"],
+          "showTitle": true,
+          "title": "AUX Controls",
+          "buttons": [
+            {
+              "label": "AUX 1 ON",
+              "icon": "flash_on",
+              "color": "#4CAF50",
+              "rpcMethod": "setAux",
+              "rpcParams": {
+                "aux": 1,
+                "state": true
+              }
+            },
+            {
+              "label": "AUX 1 OFF",
+              "icon": "flash_off",
+              "color": "#F44336",
+              "rpcMethod": "setAux",
+              "rpcParams": {
+                "aux": 1,
+                "state": false
+              }
+            },
+            {
+              "label": "AUX 2 ON",
+              "icon": "flash_on",
+              "color": "#4CAF50",
+              "rpcMethod": "setAux",
+              "rpcParams": {
+                "aux": 2,
+                "state": true
+              }
+            },
+            {
+              "label": "AUX 2 OFF",
+              "icon": "flash_off",
+              "color": "#F44336",
+              "rpcMethod": "setAux",
+              "rpcParams": {
+                "aux": 2,
+                "state": false
+              }
+            },
+            {
+              "label": "AUX 3 ON",
+              "icon": "flash_on",
+              "color": "#4CAF50",
+              "rpcMethod": "setAux",
+              "rpcParams": {
+                "aux": 3,
+                "state": true
+              }
+            },
+            {
+              "label": "AUX 3 OFF",
+              "icon": "flash_off",
+              "color": "#F44336",
+              "rpcMethod": "setAux",
+              "rpcParams": {
+                "aux": 3,
+                "state": false
+              }
+            },
+            {
+              "label": "AUX 4 ON",
+              "icon": "flash_on",
+              "color": "#4CAF50",
+              "rpcMethod": "setAux",
+              "rpcParams": {
+                "aux": 4,
+                "state": true
+              }
+            },
+            {
+              "label": "AUX 4 OFF",
+              "icon": "flash_off",
+              "color": "#F44336",
+              "rpcMethod": "setAux",
+              "rpcParams": {
+                "aux": 4,
+                "state": false
+              }
+            }
+          ]
+        }
+      },
+      "input_status": {
+        "typeFullFqn": "system.cards.entity_list",
+        "type": "latest",
+        "sizeX": 8,
+        "sizeY": 4,
+        "row": 9,
+        "col": 8,
+        "config": {
+          "datasources": [
+            {
+              "type": "entity",
+              "name": "Inputs",
+              "entityAliasId": "esp32_device",
+              "dataKeys": [
+                {
+                  "name": "switch1",
+                  "type": "timeseries",
+                  "label": "Switch 1"
+                },
+                {
+                  "name": "switch2",
+                  "type": "timeseries",
+                  "label": "Switch 2"
+                },
+                {
+                  "name": "switch3",
+                  "type": "timeseries",
+                  "label": "Switch 3"
+                },
+                {
+                  "name": "iso_input1",
+                  "type": "timeseries",
+                  "label": "ISO Input 1"
+                },
+                {
+                  "name": "iso_input2",
+                  "type": "timeseries",
+                  "label": "ISO Input 2"
+                }
+              ]
+            }
+          ],
+          "timewindow": {
+            "realtime": {
+              "timewindowMs": 60000
+            }
+          },
+          "showTitle": true,
+          "title": "Input Status",
+          "settings": {
+            "showBooleanIcon": true,
+            "iconTrue": "check_circle",
+            "iconFalse": "cancel",
+            "colorTrue": "#4CAF50",
+            "colorFalse": "#9E9E9E"
+          }
+        }
+      },
+      "weather_card": {
+        "typeFullFqn": "system.cards.html_card",
+        "type": "latest",
+        "sizeX": 8,
+        "sizeY": 4,
+        "row": 9,
+        "col": 16,
+        "config": {
+          "datasources": [
+            {
+              "type": "entity",
+              "name": "Weather",
+              "entityAliasId": "esp32_device",
+              "dataKeys": [
+                {
+                  "name": "temperature",
+                  "type": "timeseries"
+                },
+                {
+                  "name": "humidity",
+                  "type": "timeseries"
+                },
+                {
+                  "name": "weather_city",
+                  "type": "timeseries"
+                },
+                {
+                  "name": "weather_description",
+                  "type": "timeseries"
+                }
+              ]
+            }
+          ],
+          "timewindow": {
+            "realtime": {
+              "timewindowMs": 60000
+            }
+          },
+          "showTitle": true,
+          "title": "Weather Information",
+          "settings": {
+            "cardHtml": "<div style=\"text-align:center;padding:20px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;border-radius:8px;\">\n  <h1 style=\"margin:0;font-size:48px;\">${temperature}°C</h1>\n  <p style=\"margin:10px 0;font-size:18px;\">Humidity: ${humidity}%</p>\n  <p style=\"margin:5px 0;font-size:14px;\">${weather_city}</p>\n  <p style=\"margin:5px 0;font-size:14px;\">${weather_description}</p>\n</div>"
+          }
+        }
+      },
+      "aqi_card": {
+        "typeFullFqn": "system.cards.html_card",
+        "type": "latest",
+        "sizeX": 6,
+        "sizeY": 3,
+        "row": 13,
+        "col": 0,
+        "config": {
+          "datasources": [
+            {
+              "type": "entity",
+              "name": "Air Quality",
+              "entityAliasId": "esp32_device",
+              "dataKeys": [
+                {
+                  "name": "aqi",
+                  "type": "timeseries"
+                },
+                {
+                  "name": "air_quality",
+                  "type": "timeseries"
+                },
+                {
+                  "name": "pm2_5",
+                  "type": "timeseries"
+                }
+              ]
+            }
+          ],
+          "timewindow": {
+            "realtime": {
+              "timewindowMs": 60000
+            }
+          },
+          "showTitle": true,
+          "title": "Air Quality Index",
+          "settings": {
+            "cardHtml": "<div style=\"text-align:center;padding:20px;border-radius:8px;\">\n  <h1 style=\"margin:0;font-size:64px;color:#4CAF50;\">${aqi}</h1>\n  <p style=\"margin:10px 0;font-size:24px;font-weight:bold;\">${air_quality}</p>\n  <p style=\"margin:5px 0;font-size:14px;color:#666;\">PM2.5: ${pm2_5} µg/m³</p>\n</div>"
+          }
+        }
+      },
+      "emergency_stop": {
+        "typeFullFqn": "system.control_widgets.rpc_button",
+        "type": "rpc",
+        "sizeX": 6,
+        "sizeY": 3,
+        "row": 13,
+        "col": 6,
+        "config": {
+          "targetDeviceAliasIds": ["esp32_device"],
+          "showTitle": true,
+          "title": "Emergency Control",
+          "settings": {
+            "buttonLabel": "🚨 TURN OFF ALL",
+            "buttonIcon": "power_settings_new",
+            "buttonColor": "#F44336",
+            "rpcMethod": "turnOffAll",
+            "rpcParams": {},
+            "confirmRequired": true,
+            "confirmMessage": "Are you sure you want to turn off all outputs?"
+          }
+        }
+      }
+    },
+    "states": {
+      "default": {
+        "name": "ESP32 Control Panel",
+        "root": true,
+        "layouts": {
+          "main": {
+            "widgets": {},
+            "gridSettings": {
+              "backgroundColor": "#eeeeee",
+              "columns": 24,
+              "margin": 10,
+              "backgroundSizeMode": "100%"
+            }
+          }
+        }
+      }
+    },
+    "entityAliases": {
+      "esp32_device": {
+        "id": "esp32_device",
+        "alias": "ESP32_ThaiTechZone_V2",
+        "filter": {
+          "type": "singleEntity",
+          "resolveMultiple": false,
+          "singleEntity": {
+            "entityType": "DEVICE",
+            "id": null
+          }
+        }
+      }
+    },
+    "filters": {},
+    "timewindow": {
+      "displayValue": "",
+      "hideInterval": false,
+      "hideLastInterval": false,
+      "hideQuickInterval": false,
+      "hideAggregation": false,
+      "hideAggInterval": false,
+      "hideTimezone": false,
+      "selectedTab": 0,
+      "realtime": {
+        "realtimeType": 1,
+        "interval": 1000,
+        "timewindowMs": 60000,
+        "quickInterval": "CURRENT_DAY"
+      },
+      "aggregation": {
+        "type": "AVG",
+        "limit": 25000
+      }
+    },
+    "settings": {
+      "stateControllerId": "entity",
+      "showTitle": true,
+      "showDashboardsSelect": true,
+      "showEntitiesSelect": true,
+      "showDashboardTimewindow": true,
+      "showDashboardExport": true,
+      "toolbarAlwaysOpen": true
+    }
+  }
+}
