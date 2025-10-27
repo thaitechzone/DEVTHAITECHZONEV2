@@ -6,9 +6,10 @@
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <time.h>
+// PubSubClient (ThingsBoard) removed
 
 // ===== Pin Definitions =====
-// Input Toggle Switches
+// Input Toggle Switches 
 #define SW1_PIN 34
 #define SW2_PIN 35
 #define SW3_PIN 32
@@ -32,6 +33,25 @@
 // ===== WiFi Configuration =====
 const char* WIFI_SSID = "myHome_2.4GHz";
 const char* WIFI_PASSWORD = "0939391546";
+
+// ===== MQTT Configuration (ThingsBoard) =====
+// ThingsBoard Cloud: demo.thingsboard.io (Free tier)
+// ThingsBoard PE: thingsboard.cloud
+// Local installation: Your server IP
+const char* MQTT_BROKER = "demo.thingsboard.io";
+const int MQTT_PORT = 1883;
+const char* MQTT_CLIENT_ID = "ESP32_ThaiTechZone_V2";
+
+// ThingsBoard Device Access Token (Get from Device Credentials page)
+// TODO: Replace with your actual device token from ThingsBoard
+const char* MQTT_USER = "37u5JARLNBIgKmTUnmDM";  // Device Access Token
+const char* MQTT_PASSWORD = "";  // Leave empty for ThingsBoard
+
+// ThingsBoard MQTT Topics (Standard format)
+const char* TB_TOPIC_TELEMETRY = "v1/devices/me/telemetry";        // Send telemetry data
+const char* TB_TOPIC_ATTRIBUTES = "v1/devices/me/attributes";      // Send/request attributes
+const char* TB_TOPIC_RPC_REQUEST = "v1/devices/me/rpc/request/+";  // Receive RPC commands
+const char* TB_TOPIC_RPC_RESPONSE = "v1/devices/me/rpc/response/"; // Send RPC response (+ requestId)
 
 // ===== NTP Configuration =====
 const char* NTP_SERVER1 = "pool.ntp.org";
@@ -57,11 +77,15 @@ const float NAKHON_SI_THAMMARAT_LON = 99.9631;  // Longitude
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
+// MQTT/ThingsBoard removed: using Serial-only telemetry
+WiFiClient espClient; // kept for potential HTTPS calls
+
 // ===== Global Variables for Test Cycle =====
 int current_test_step = 0;
 const int total_test_steps = 7;
 unsigned long test_step_timer = 0;
 const unsigned long test_interval_ms = 1500;
+bool auto_mode = true;  // Auto mode = cycling test, Manual mode = MQTT control
 
 // ===== Global Variables for Weather =====
 unsigned long weather_update_timer = 0;
@@ -106,6 +130,21 @@ String wifi_status = "Disconnected";
 String wifi_ip = "N/A";
 bool time_synced = false;
 
+// ===== MQTT Status Variables =====
+// MQTT removed; these variables are no longer used
+// bool mqtt_connected = false;
+unsigned long mqtt_reconnect_timer = 0;
+const unsigned long mqtt_reconnect_interval = 5000;
+unsigned long mqtt_publish_timer = 0;
+const unsigned long mqtt_publish_interval = 2000;  // Publish status every 2 seconds (เร็วขึ้น)
+unsigned long last_debug_print = 0;
+const unsigned long debug_print_interval = 10000;  // Debug print every 10 seconds
+
+// ===== Switch debounce / toggle globals =====
+const unsigned long SWITCH_DEBOUNCE_MS = 50; // debounce window in milliseconds
+unsigned long lastSwitchMillis[3] = {0, 0, 0};
+bool lastSwitchState[3] = {HIGH, HIGH, HIGH}; // INPUT_PULLUP: HIGH = released
+
 // ===== Function Declarations =====
 void updateOledDisplay(String test_item, String wifi_info);
 void turnOffAllOutputs();
@@ -118,6 +157,11 @@ String getCurrentTime();
 void fetchWeatherData();
 void fetchAirQualityData();
 String getAQIQuality(int aqi);
+// MQTT removed - replaced by Serial telemetry
+void publishSerialStatus();
+void setRelayState(int relay, bool state);
+void setAuxState(int aux, bool state);
+void handleSwitches();
 
 // ===== Setup Function =====
 void setup() {
@@ -184,55 +228,76 @@ void setup() {
   // 5. Connect to WiFi
   connectWiFi();
   
-  // 6. Sync Time with NTP Server
+  // 6. Setup MQTT
+  // ThingsBoard/MQTT integration removed in this build
+  Serial.println("ThingsBoard/MQTT integration is disabled in this firmware.");
+  
+  // 7. Sync Time with NTP Server
   if(WiFi.status() == WL_CONNECTED) {
     syncNTPTime();
     fetchWeatherData();       // Fetch initial weather data
     fetchAirQualityData();    // Fetch initial air quality data
+    connectMQTT();            // Connect to MQTT broker
   }
   
   // Initialize timers
   test_step_timer = millis();
   weather_update_timer = millis();
   aqi_update_timer = millis();
+  mqtt_publish_timer = millis();
 }
 
 // ===== Main Loop =====
 void loop() {
   static String current_test_name = "Initializing";
   
-  // 1. Automated Output Test Cycle
-  runTestCycle();
+  // 1. MQTT/ThingsBoard removed - no connection maintenance
+
+  // 1.5 Handle physical switches (debounced toggles for RELAY1-3)
+  handleSwitches();
   
-  // Update test name based on CURRENT active output (before incrementing)
-  // This ensures the display matches what's actually ON
-  switch(current_test_step) {
-    case 0: current_test_name = "-> RELAY 1"; break;
-    case 1: current_test_name = "-> RELAY 2"; break;
-    case 2: current_test_name = "-> RELAY 3"; break;
-    case 3: current_test_name = "-> AUX 1"; break;
-    case 4: current_test_name = "-> AUX 2"; break;
-    case 5: current_test_name = "-> AUX 3"; break;
-    case 6: current_test_name = "-> AUX 4"; break;
-    default: current_test_name = "-> ALL OFF"; break;
+  // 2. Automated Output Test Cycle (only in auto mode)
+  if (auto_mode) {
+    runTestCycle();
+    
+    // Update test name based on CURRENT active output (before incrementing)
+    // This ensures the display matches what's actually ON
+    switch(current_test_step) {
+      case 0: current_test_name = "-> RELAY 1"; break;
+      case 1: current_test_name = "-> RELAY 2"; break;
+      case 2: current_test_name = "-> RELAY 3"; break;
+      case 3: current_test_name = "-> AUX 1"; break;
+      case 4: current_test_name = "-> AUX 2"; break;
+      case 5: current_test_name = "-> AUX 3"; break;
+      case 6: current_test_name = "-> AUX 4"; break;
+      default: current_test_name = "-> ALL OFF"; break;
+    }
+  } else {
+    current_test_name = "MANUAL MODE";
   }
   
-  // 2. Update WiFi Status
+  // 3. Update WiFi Status
   String wifi_info = getWiFiStatus();
   
-  // 3. Update Weather Data periodically
+  // 4. Update Weather Data periodically
   if (millis() - weather_update_timer >= weather_update_interval_ms) {
     weather_update_timer = millis();
     fetchWeatherData();
   }
   
-  // 4. Update Air Quality Data periodically
+  // 5. Update Air Quality Data periodically
   if (millis() - aqi_update_timer >= aqi_update_interval_ms) {
     aqi_update_timer = millis();
     fetchAirQualityData();
   }
   
-  // 5. Update OLED Display
+  // 6. Publish Serial Status periodically (replacing MQTT telemetry)
+  if (millis() - mqtt_publish_timer >= mqtt_publish_interval) {
+    mqtt_publish_timer = millis();
+    publishSerialStatus();
+  }
+  
+  // 7. Update OLED Display
   updateOledDisplay(current_test_name, wifi_info);
   
   // Small delay for stability
@@ -717,7 +782,6 @@ String getAQIQuality(int aqi) {
 void updateOledDisplay(String test_item, String wifi_info) {
   static unsigned long last_update = 0;
   static String last_time_str = "";
-  static unsigned long last_serial_update = 0;
   String current_time_str = time_synced ? getCurrentTime() : "";
   
   // Force update every second if time is synced, or when data changes
@@ -726,46 +790,105 @@ void updateOledDisplay(String test_item, String wifi_info) {
                        wifi_info != last_wifi_status ||
                        current_time_str != last_time_str);
   
-  // Send to Serial Monitor every 3 seconds or when data changes
-  bool serial_update = (millis() - last_serial_update >= 3000) || data_changed;
-  
-  if(serial_update) {
-    last_serial_update = millis();
+  // Print debug info every 10 seconds (ไม่บ่อยเกินไป)
+  if (millis() - last_debug_print >= debug_print_interval) {
+    last_debug_print = millis();
     
-    // Print current status to Serial
-    Serial.println("\n========== Board Status ==========");
-    Serial.print("Test: ");
-    Serial.println(test_item);
-    Serial.print("Inputs: ");
-    Serial.println(readInputStates());
-    Serial.print("WiFi: ");
-    Serial.println(wifi_info);
+    Serial.println("\n╔════════════════════════════════════════════════╗");
+    Serial.println("║         ESP32 BOARD STATUS REPORT              ║");
+    Serial.println("╠════════════════════════════════════════════════╣");
     
-    if(time_synced) {
-      struct tm timeinfo;
-      if(getLocalTime(&timeinfo)) {
-        Serial.printf("Time: %02d:%02d:%02d\n", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-        Serial.printf("Date: %02d/%02d/%04d\n", timeinfo.tm_mday, timeinfo.tm_mon + 1, timeinfo.tm_year + 1900);
-      }
-    } else {
-      Serial.println("Time: Not synced");
-    }
+    // System Info
+    Serial.print("║ Mode: ");
+    Serial.print(auto_mode ? "AUTO" : "MANUAL");
+    Serial.print(" | Uptime: ");
+    Serial.print(millis() / 1000);
+    Serial.println(" sec");
     
+    // WiFi Info
+    Serial.print("║ WiFi: ");
+    Serial.print(WiFi.RSSI());
+    Serial.print(" dBm | IP: ");
+    Serial.println(WiFi.localIP());
+    
+  // MQTT Status
+  Serial.print("║ MQTT: ");
+  Serial.println("DISABLED in this build");
+    
+    Serial.println("╠════════════════════════════════════════════════╣");
+    
+    // Output States
+    Serial.println("║ OUTPUT STATES:");
+    Serial.print("║   Relay 1: ");
+    Serial.print(!digitalRead(RL1_PIN) ? "ON " : "OFF");
+    Serial.print(" | Relay 2: ");
+    Serial.print(!digitalRead(RL2_PIN) ? "ON " : "OFF");
+    Serial.print(" | Relay 3: ");
+    Serial.println(!digitalRead(RL3_PIN) ? "ON " : "OFF");
+    
+    Serial.print("║   AUX 1: ");
+    Serial.print(digitalRead(AUX1_PIN) ? "ON " : "OFF");
+    Serial.print(" | AUX 2: ");
+    Serial.print(digitalRead(AUX2_PIN) ? "ON " : "OFF");
+    Serial.print(" | AUX 3: ");
+    Serial.print(digitalRead(AUX3_PIN) ? "ON " : "OFF");
+    Serial.print(" | AUX 4: ");
+    Serial.println(digitalRead(AUX4_PIN) ? "ON " : "OFF");
+    
+    // Input States
+    Serial.println("║ INPUT STATES:");
+    Serial.print("║   SW1: ");
+    Serial.print(!digitalRead(SW1_PIN) ? "PRESSED" : "RELEASED");
+    Serial.print(" | SW2: ");
+    Serial.print(!digitalRead(SW2_PIN) ? "PRESSED" : "RELEASED");
+    Serial.print(" | SW3: ");
+    Serial.println(!digitalRead(SW3_PIN) ? "PRESSED" : "RELEASED");
+    
+    Serial.print("║   ISO1: ");
+    Serial.print(!digitalRead(ISOIN1_PIN) ? "ACTIVE" : "INACTIVE");
+    Serial.print(" | ISO2: ");
+    Serial.println(!digitalRead(ISOIN2_PIN) ? "ACTIVE" : "INACTIVE");
+    
+    Serial.println("╠════════════════════════════════════════════════╣");
+    
+    // Weather Data
+    Serial.println("║ WEATHER DATA:");
     if (weather_data_valid) {
-      Serial.printf("Weather: %dC H%d%%\n", current_weather.temp_current, current_weather.humidity);
+      Serial.print("║   Temperature: ");
+      Serial.print(current_weather.temp_current);
+      Serial.print("°C | Humidity: ");
+      Serial.print(current_weather.humidity);
+      Serial.println("%");
+      Serial.print("║   City: ");
+      Serial.print(current_weather.city_name);
+      Serial.print(" | ");
+      Serial.println(current_weather.description);
     } else {
-      Serial.print("Weather: ");
-      Serial.println(weather_status);
+      Serial.print("║   Status: ");
+      Serial.print(weather_status);
+      Serial.println(" (Waiting for data...)");
     }
     
+    // Air Quality Data
+    Serial.println("║ AIR QUALITY DATA:");
     if (aqi_data_valid) {
-      Serial.printf("AirQuality: PM2.5=%.1f AQI=%d (%s)\n", 
-                    air_quality.pm2_5, air_quality.aqi, air_quality.quality.c_str());
+      Serial.print("║   PM2.5: ");
+      Serial.print(air_quality.pm2_5, 1);
+      Serial.print(" µg/m³ | PM10: ");
+      Serial.print(air_quality.pm10, 1);
+      Serial.println(" µg/m³");
+      Serial.print("║   AQI: ");
+      Serial.print(air_quality.aqi);
+      Serial.print(" (");
+      Serial.print(air_quality.quality);
+      Serial.println(")");
     } else {
-      Serial.print("AirQuality: ");
-      Serial.println(aqi_status);
+      Serial.print("║   Status: ");
+      Serial.print(aqi_status);
+      Serial.println(" (Waiting for data...)");
     }
-    Serial.println("==================================\n");
+    
+    Serial.println("╚════════════════════════════════════════════════╝\n");
   }
   
   // Skip OLED update if not available
@@ -850,4 +973,202 @@ void updateOledDisplay(String test_item, String wifi_info) {
   
   // Update display
   display.display();
+}
+
+// ===== Helper Function: Connect to MQTT Broker (ThingsBoard) =====
+// connectMQTT removed - ThingsBoard integration disabled
+
+// ===== Helper Function: MQTT Callback for Incoming Messages (ThingsBoard RPC) =====
+// mqttCallback removed - ThingsBoard RPC not supported in this build
+
+// ===== Helper Function: Publish MQTT Status (ThingsBoard Telemetry) =====
+void publishMQTTStatus() {
+  if (!mqttClient.connected()) {
+    Serial.println("⚠️  MQTT not connected - skipping telemetry");
+    return;
+  }
+  
+  // Create telemetry JSON document with optimized size
+  DynamicJsonDocument doc(512);  // ลดขนาดลง เพราะไม่ส่ง Weather/AQI ตลอดเวลา
+  
+  // System information (ส่งเสมอ)
+  doc["uptime"] = millis() / 1000;
+  doc["mode"] = auto_mode ? "auto" : "manual";
+  doc["wifi_rssi"] = WiFi.RSSI();
+  doc["free_heap"] = ESP.getFreeHeap();
+  
+  // Relay States (Active Low - inverted for clarity)
+  doc["relay1"] = !digitalRead(RL1_PIN);
+  doc["relay2"] = !digitalRead(RL2_PIN);
+  doc["relay3"] = !digitalRead(RL3_PIN);
+  
+  // AUX States
+  doc["aux1"] = digitalRead(AUX1_PIN);
+  doc["aux2"] = digitalRead(AUX2_PIN);
+  doc["aux3"] = digitalRead(AUX3_PIN);
+  doc["aux4"] = digitalRead(AUX4_PIN);
+  
+  // Input States (Active Low - inverted)
+  doc["switch1"] = !digitalRead(SW1_PIN);
+  doc["switch2"] = !digitalRead(SW2_PIN);
+  doc["switch3"] = !digitalRead(SW3_PIN);
+  doc["iso_input1"] = !digitalRead(ISOIN1_PIN);
+  doc["iso_input2"] = !digitalRead(ISOIN2_PIN);
+  
+  // Weather Data - ส่งเฉพาะเมื่อมีข้อมูลจริง
+  if (weather_data_valid) {
+    doc["temperature"] = current_weather.temp_current;
+    doc["humidity"] = current_weather.humidity;
+    // ข้าม city และ description เพื่อลดขนาด JSON
+  }
+  
+  // Air Quality Data - ส่งเฉพาะเมื่อมีข้อมูลจริง
+  if (aqi_data_valid) {
+    doc["pm2_5"] = air_quality.pm2_5;
+    doc["aqi"] = air_quality.aqi;
+    // ข้าม pm10 และ air_quality text เพื่อลดขนาด JSON
+  }
+  
+  // Check if JSON serialization is successful
+  if (doc.overflowed()) {
+    Serial.println("❌ JSON buffer overflow!");
+    return;
+  }
+  
+  // Serialize and print telemetry JSON to Serial (ThingsBoard removed)
+  String output;
+  size_t jsonSize = serializeJson(doc, output);
+
+  Serial.println("\n┌─────────────────────────────────────────────┐");
+  Serial.println("│       TELEMETRY (Serial Output)             │");
+  Serial.println("├─────────────────────────────────────────────┤");
+  Serial.print("│ JSON Size: ");
+  Serial.print(jsonSize);
+  Serial.println(" bytes");
+  Serial.print("│ Weather: ");
+  Serial.print(weather_data_valid ? "✓" : "✗");
+  Serial.print(" | AQI: ");
+  Serial.println(aqi_data_valid ? "✓" : "✗");
+  Serial.println("└─────────────────────────────────────────────┘");
+  Serial.print("Telemetry JSON: ");
+  Serial.println(output);
+  Serial.println();
+}
+
+// ===== Helper Function: Set Relay State =====
+void setRelayState(int relay, bool state) {
+  // Relay pins are Active Low: LOW = ON, HIGH = OFF
+  int pin = -1;
+  switch(relay) {
+    case 1: pin = RL1_PIN; break;
+    case 2: pin = RL2_PIN; break;
+    case 3: pin = RL3_PIN; break;
+    default: return;
+  }
+  
+  digitalWrite(pin, state ? LOW : HIGH);  // Inverted because Active Low
+  
+  Serial.print("Relay ");
+  Serial.print(relay);
+  Serial.print(" set to ");
+  Serial.println(state ? "ON" : "OFF");
+  
+  // Send immediate telemetry update
+  DynamicJsonDocument doc(128);
+  String relayKey = "relay" + String(relay);
+  doc[relayKey] = state;
+  
+  String output;
+  serializeJson(doc, output);
+  // ThingsBoard removed - print to Serial instead
+  Serial.print("Relay telemetry (Serial): ");
+  Serial.println(output);
+}
+
+// ===== Helper Function: Set AUX State =====
+void setAuxState(int aux, bool state) {
+  int pin = -1;
+  switch(aux) {
+    case 1: pin = AUX1_PIN; break;
+    case 2: pin = AUX2_PIN; break;
+    case 3: pin = AUX3_PIN; break;
+    case 4: pin = AUX4_PIN; break;
+    default: return;
+  }
+  
+  digitalWrite(pin, state ? HIGH : LOW);
+  
+  Serial.print("AUX ");
+  Serial.print(aux);
+  Serial.print(" set to ");
+  Serial.println(state ? "ON" : "OFF");
+  
+  // Send immediate telemetry update
+  DynamicJsonDocument doc(128);
+  String auxKey = "aux" + String(aux);
+  doc[auxKey] = state;
+  
+  String output;
+  serializeJson(doc, output);
+  // ThingsBoard removed - print to Serial instead
+  Serial.print("AUX telemetry (Serial): ");
+  Serial.println(output);
+}
+
+// ===== Helper Function: Handle Switches (debounced toggle for Relays 1-3) =====
+void handleSwitches() {
+  // Array of switch pins and corresponding relay pins
+  const int swPins[3] = {SW1_PIN, SW2_PIN, SW3_PIN};
+  const int rlPins[3] = {RL1_PIN, RL2_PIN, RL3_PIN};
+
+  unsigned long now = millis();
+
+  for (int i = 0; i < 3; i++) {
+    bool reading = digitalRead(swPins[i]); // INPUT_PULLUP: HIGH = released, LOW = pressed
+
+    // If stable longer than debounce interval
+    if (reading != lastSwitchState[i]) {
+      // state changed; reset timer
+      lastSwitchMillis[i] = now;
+      lastSwitchState[i] = reading;
+    } else {
+      // state unchanged; check if it's a debounced falling edge (pressed)
+      if (now - lastSwitchMillis[i] >= SWITCH_DEBOUNCE_MS) {
+        // We consider a press when reading == LOW
+        static bool processed[3] = {false,false,false};
+
+        if (reading == LOW && !processed[i]) {
+          // Toggle the relay: relays are active LOW (LOW = ON)
+          bool currentOn = !digitalRead(rlPins[i]);
+          bool newOn = !currentOn;
+          digitalWrite(rlPins[i], newOn ? LOW : HIGH);
+
+          Serial.print("SW"); Serial.print(i+1);
+          Serial.print(" pressed -> Relay"); Serial.print(i+1);
+          Serial.print(" set to "); Serial.println(newOn ? "ON" : "OFF");
+
+          // Optionally publish immediate telemetry if MQTT connected
+          if (mqttClient.connected()) {
+            // send only the single relay state to reduce payload
+            DynamicJsonDocument doc(128);
+            String key = String("relay") + String(i+1);
+            doc[key] = newOn;
+            String out;
+            serializeJson(doc, out);
+            mqttClient.publish(TB_TOPIC_TELEMETRY, out.c_str());
+          }
+
+          processed[i] = true; // avoid retrigger until release
+        }
+
+        // Reset processed flag on release
+        if (reading == HIGH) {
+          static bool processed_release[3] = {false,false,false};
+          if (processed[i]) {
+            processed[i] = false;
+          }
+        }
+      }
+    }
+  }
 }
