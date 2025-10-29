@@ -7,6 +7,8 @@
 #include <ArduinoJson.h>
 #include <time.h>
 #include <DHT.h>
+#include <ESPAsyncWebServer.h>
+#include <LittleFS.h>
 // PubSubClient (ThingsBoard) removed
 
 // ===== Pin Definitions =====
@@ -71,6 +73,24 @@ DHT dht(DHT_PIN, DHT_TYPE);
 
 // WiFi client for HTTPS calls (weather, air quality APIs)
 WiFiClient espClient;
+
+// ===== Web Server Configuration =====
+AsyncWebServer server(80);
+const char* http_username = "admin";
+const char* http_password = "password";
+
+// ===== Timer Variables =====
+struct RelayTimer {
+  bool active;
+  int relay_num;
+  unsigned long end_time;
+};
+RelayTimer relay_timer = {false, 0, 0};
+
+// ===== Event Log Variables =====
+const int MAX_LOGS = 50;
+String event_logs[MAX_LOGS];
+int log_index = 0;
 
 // ===== Global Variables for Test Cycle =====
 int current_test_step = 0;
@@ -155,6 +175,9 @@ void readDHT22Data();
 void setRelayState(int relay, bool state);
 void setAuxState(int aux, bool state);
 void handleSwitches();
+void setupWebServer();
+void addLog(String message);
+void handleTimers();
 
 // ===== Setup Function =====
 void setup() {
@@ -225,10 +248,23 @@ void setup() {
   // 6. Connect to WiFi
   connectWiFi();
   
-  // 7. Serial debug setup
+  // 7. Initialize LittleFS
+  if(!LittleFS.begin(true)) {
+    Serial.println("LittleFS Mount Failed");
+  } else {
+    Serial.println("LittleFS Mounted Successfully");
+  }
+  
+  // 8. Setup Web Server
+  setupWebServer();
+  Serial.println("Web Server Started");
+  Serial.print("Access Dashboard at: http://");
+  Serial.println(WiFi.localIP());
+  
+  // 9. Serial debug setup
   Serial.println("Serial debugging enabled (115200 baud)");
   
-  // 8. Sync Time with NTP Server and initialize data
+  // 10. Sync Time with NTP Server and initialize data
   if(WiFi.status() == WL_CONNECTED) {
     syncNTPTime();
     fetchWeatherData();       // Fetch initial weather data
@@ -292,6 +328,9 @@ void loop() {
 
   // 1.5 Handle physical switches (debounced toggles for RELAY1-3)
   handleSwitches();
+  
+  // 1.6 Handle timers
+  handleTimers();
   
   // 2. Automated Output Test Cycle (only in auto mode)
   if (auto_mode) {
@@ -1152,4 +1191,202 @@ void handleSwitches() {
       }
     }
   }
+}
+
+// ===== Web Server Functions =====
+
+// Add log entry
+void addLog(String message) {
+  struct tm timeinfo;
+  char timeStr[20];
+  if (getLocalTime(&timeinfo)) {
+    sprintf(timeStr, "%02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+  } else {
+    sprintf(timeStr, "%lu", millis() / 1000);
+  }
+  
+  event_logs[log_index] = String(timeStr) + " - " + message;
+  log_index = (log_index + 1) % MAX_LOGS;
+  
+  Serial.print("LOG: ");
+  Serial.println(message);
+}
+
+// Handle timers
+void handleTimers() {
+  if (relay_timer.active && millis() >= relay_timer.end_time) {
+    // Timer expired - turn off relay
+    setRelayState(relay_timer.relay_num, false);
+    addLog("Timer completed for Relay " + String(relay_timer.relay_num));
+    relay_timer.active = false;
+  }
+}
+
+// Setup Web Server
+void setupWebServer() {
+  // Serve static files from LittleFS
+  server.serveStatic("/", LittleFS, "/").setDefaultFile("login.html");
+  
+  // API: Get Status (with authentication)
+  server.on("/api/status", HTTP_GET, [](AsyncWebServerRequest *request){
+    if(!request->authenticate(http_username, http_password)){
+      return request->requestAuthentication();
+    }
+    
+    DynamicJsonDocument doc(1024);
+    
+    // System info
+    doc["mode"] = auto_mode ? "AUTO" : "MANUAL";
+    doc["uptime"] = millis() / 1000;
+    doc["wifi_rssi"] = WiFi.RSSI();
+    doc["free_heap"] = ESP.getFreeHeap();
+    
+    // Relay states (Active Low - inverted for clarity)
+    doc["relay1"] = !digitalRead(RL1_PIN);
+    doc["relay2"] = !digitalRead(RL2_PIN);
+    doc["relay3"] = !digitalRead(RL3_PIN);
+    
+    // AUX states
+    doc["aux1"] = digitalRead(AUX1_PIN);
+    doc["aux2"] = digitalRead(AUX2_PIN);
+    doc["aux3"] = digitalRead(AUX3_PIN);
+    doc["aux4"] = digitalRead(AUX4_PIN);
+    
+    // Input states (Active Low - inverted)
+    doc["switch1"] = !digitalRead(SW1_PIN);
+    doc["switch2"] = !digitalRead(SW2_PIN);
+    doc["switch3"] = !digitalRead(SW3_PIN);
+    doc["iso_input1"] = !digitalRead(ISOIN1_PIN);
+    doc["iso_input2"] = !digitalRead(ISOIN2_PIN);
+    
+    // Sensor data
+    doc["dht_temperature"] = dht_temperature;
+    doc["dht_humidity"] = dht_humidity;
+    
+    if (weather_data_valid) {
+      doc["weather_temp"] = current_weather.temp_current;
+      doc["weather_humid"] = current_weather.humidity;
+    }
+    
+    if (aqi_data_valid) {
+      doc["aqi"] = air_quality.aqi;
+      doc["aqi_quality"] = air_quality.quality;
+    }
+    
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response);
+  });
+  
+  // API: Toggle Relay (with authentication)
+  server.on("^\\/api\\/relay\\/([1-3])\\/toggle$", HTTP_POST, [](AsyncWebServerRequest *request){
+    if(!request->authenticate(http_username, http_password)){
+      return request->requestAuthentication();
+    }
+    
+    String relayNum = request->pathArg(0);
+    int relay = relayNum.toInt();
+    
+    // Get current state and toggle
+    int pin = (relay == 1) ? RL1_PIN : (relay == 2) ? RL2_PIN : RL3_PIN;
+    bool currentState = !digitalRead(pin); // Active Low - invert
+    bool newState = !currentState;
+    
+    setRelayState(relay, newState);
+    addLog("Web: Relay " + String(relay) + " " + (newState ? "ON" : "OFF"));
+    
+    DynamicJsonDocument doc(128);
+    doc["relay"] = relay;
+    doc["state"] = newState;
+    
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response);
+  });
+  
+  // API: Toggle Mode (with authentication)
+  server.on("/api/mode/toggle", HTTP_POST, [](AsyncWebServerRequest *request){
+    if(!request->authenticate(http_username, http_password)){
+      return request->requestAuthentication();
+    }
+    
+    auto_mode = !auto_mode;
+    addLog("Mode changed to " + String(auto_mode ? "AUTO" : "MANUAL"));
+    
+    DynamicJsonDocument doc(128);
+    doc["mode"] = auto_mode ? "AUTO" : "MANUAL";
+    
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response);
+  });
+  
+  // API: Start Timer (with authentication)
+  server.on("/api/timer", HTTP_POST, [](AsyncWebServerRequest *request){
+    if(!request->authenticate(http_username, http_password)){
+      return request->requestAuthentication();
+    }
+    
+    // This will be called after body is received
+  }, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
+    // Parse JSON body
+    DynamicJsonDocument doc(256);
+    DeserializationError error = deserializeJson(doc, data);
+    
+    if (error) {
+      request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+      return;
+    }
+    
+    int relay = doc["relay"];
+    int duration = doc["duration"];
+    
+    if (relay < 1 || relay > 3 || duration < 1) {
+      request->send(400, "application/json", "{\"error\":\"Invalid parameters\"}");
+      return;
+    }
+    
+    // Start timer
+    relay_timer.active = true;
+    relay_timer.relay_num = relay;
+    relay_timer.end_time = millis() + (duration * 1000);
+    
+    // Turn on relay
+    setRelayState(relay, true);
+    addLog("Timer started: Relay " + String(relay) + " for " + String(duration) + "s");
+    
+    DynamicJsonDocument responseDoc(128);
+    responseDoc["success"] = true;
+    responseDoc["relay"] = relay;
+    responseDoc["duration"] = duration;
+    
+    String response;
+    serializeJson(responseDoc, response);
+    request->send(200, "application/json", response);
+  });
+  
+  // API: Get Logs (with authentication)
+  server.on("/api/logs", HTTP_GET, [](AsyncWebServerRequest *request){
+    if(!request->authenticate(http_username, http_password)){
+      return request->requestAuthentication();
+    }
+    
+    DynamicJsonDocument doc(2048);
+    JsonArray logs = doc.createNestedArray("logs");
+    
+    for (int i = 0; i < MAX_LOGS; i++) {
+      int idx = (log_index + i) % MAX_LOGS;
+      if (event_logs[idx].length() > 0) {
+        logs.add(event_logs[idx]);
+      }
+    }
+    
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response);
+  });
+  
+  // Start server
+  server.begin();
+  addLog("Web Server Started");
 }
