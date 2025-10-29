@@ -34,24 +34,9 @@
 const char* WIFI_SSID = "myHome_2.4GHz";
 const char* WIFI_PASSWORD = "0939391546";
 
-// ===== MQTT Configuration (ThingsBoard) =====
-// ThingsBoard Cloud: demo.thingsboard.io (Free tier)
-// ThingsBoard PE: thingsboard.cloud
-// Local installation: Your server IP
-const char* MQTT_BROKER = "demo.thingsboard.io";
-const int MQTT_PORT = 1883;
-const char* MQTT_CLIENT_ID = "ESP32_ThaiTechZone_V2";
-
-// ThingsBoard Device Access Token (Get from Device Credentials page)
-// TODO: Replace with your actual device token from ThingsBoard
-const char* MQTT_USER = "37u5JARLNBIgKmTUnmDM";  // Device Access Token
-const char* MQTT_PASSWORD = "";  // Leave empty for ThingsBoard
-
-// ThingsBoard MQTT Topics (Standard format)
-const char* TB_TOPIC_TELEMETRY = "v1/devices/me/telemetry";        // Send telemetry data
-const char* TB_TOPIC_ATTRIBUTES = "v1/devices/me/attributes";      // Send/request attributes
-const char* TB_TOPIC_RPC_REQUEST = "v1/devices/me/rpc/request/+";  // Receive RPC commands
-const char* TB_TOPIC_RPC_RESPONSE = "v1/devices/me/rpc/response/"; // Send RPC response (+ requestId)
+// ===== MQTT Configuration (ThingsBoard) - REMOVED =====
+// ThingsBoard integration has been disabled in this build
+// All telemetry is now output to Serial monitor only
 
 // ===== NTP Configuration =====
 const char* NTP_SERVER1 = "pool.ntp.org";
@@ -237,7 +222,7 @@ void setup() {
     syncNTPTime();
     fetchWeatherData();       // Fetch initial weather data
     fetchAirQualityData();    // Fetch initial air quality data
-    connectMQTT();            // Connect to MQTT broker
+    // ThingsBoard/MQTT connection removed
   }
   
   // Initialize timers
@@ -250,6 +235,45 @@ void setup() {
 // ===== Main Loop =====
 void loop() {
   static String current_test_name = "Initializing";
+  
+  // 0. Startup sequence: Turn ON relays 1-3 for 3 seconds, then OFF for 3 seconds
+  static bool startup_sequence_done = false;
+  static unsigned long startup_timer = 0;
+  static int startup_phase = 0; // 0=start, 1=relays ON, 2=relays OFF, 3=done
+  
+  if (!startup_sequence_done) {
+    if (startup_phase == 0) {
+      // Start sequence - turn ON all relays (Active Low: LOW = ON)
+      digitalWrite(RL1_PIN, LOW);
+      digitalWrite(RL2_PIN, LOW);
+      digitalWrite(RL3_PIN, LOW);
+      startup_timer = millis();
+      startup_phase = 1;
+      current_test_name = "STARTUP: ON";
+      Serial.println("Startup: Relays 1-3 ON for 3 seconds");
+    } else if (startup_phase == 1 && (millis() - startup_timer >= 3000)) {
+      // After 3 seconds ON, turn OFF all relays (Active Low: HIGH = OFF)
+      digitalWrite(RL1_PIN, HIGH);
+      digitalWrite(RL2_PIN, HIGH);
+      digitalWrite(RL3_PIN, HIGH);
+      startup_timer = millis();
+      startup_phase = 2;
+      current_test_name = "STARTUP: OFF";
+      Serial.println("Startup: Relays 1-3 OFF for 3 seconds");
+    } else if (startup_phase == 2 && (millis() - startup_timer >= 3000)) {
+      // After 3 seconds OFF, startup sequence complete
+      startup_sequence_done = true;
+      startup_phase = 3;
+      current_test_name = "Initializing";
+      Serial.println("Startup sequence completed - normal operation begins");
+    }
+    
+    // During startup sequence, only update OLED and return early
+    String wifi_info = getWiFiStatus();
+    updateOledDisplay(current_test_name, wifi_info);
+    delay(10);
+    return;
+  }
   
   // 1. MQTT/ThingsBoard removed - no connection maintenance
 
@@ -981,12 +1005,9 @@ void updateOledDisplay(String test_item, String wifi_info) {
 // ===== Helper Function: MQTT Callback for Incoming Messages (ThingsBoard RPC) =====
 // mqttCallback removed - ThingsBoard RPC not supported in this build
 
-// ===== Helper Function: Publish MQTT Status (ThingsBoard Telemetry) =====
-void publishMQTTStatus() {
-  if (!mqttClient.connected()) {
-    Serial.println("⚠️  MQTT not connected - skipping telemetry");
-    return;
-  }
+// ===== Helper Function: Publish Serial Status (ThingsBoard removed) =====
+void publishSerialStatus() {
+  // ThingsBoard removed - always publish to Serial
   
   // Create telemetry JSON document with optimized size
   DynamicJsonDocument doc(512);  // ลดขนาดลง เพราะไม่ส่ง Weather/AQI ตลอดเวลา
@@ -1147,16 +1168,14 @@ void handleSwitches() {
           Serial.print(" pressed -> Relay"); Serial.print(i+1);
           Serial.print(" set to "); Serial.println(newOn ? "ON" : "OFF");
 
-          // Optionally publish immediate telemetry if MQTT connected
-          if (mqttClient.connected()) {
-            // send only the single relay state to reduce payload
-            DynamicJsonDocument doc(128);
-            String key = String("relay") + String(i+1);
-            doc[key] = newOn;
-            String out;
-            serializeJson(doc, out);
-            mqttClient.publish(TB_TOPIC_TELEMETRY, out.c_str());
-          }
+          // Print immediate telemetry to Serial (ThingsBoard removed)
+          DynamicJsonDocument doc(128);
+          String key = String("relay") + String(i+1);
+          doc[key] = newOn;
+          String out;
+          serializeJson(doc, out);
+          Serial.print("Switch telemetry (Serial): ");
+          Serial.println(out);
 
           processed[i] = true; // avoid retrigger until release
         }
