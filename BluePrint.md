@@ -11,7 +11,9 @@ The program is a comprehensive board test application that:
 - Monitors air quality (PM2.5) using OpenWeatherMap Air Pollution API
 - Displays all information on an I2C OLED screen with optimized layout
 - Supports operation with or without OLED display connected
-- Outputs all status to Serial Monitor for debugging
+- Integrates DHT22 sensor for local temperature and humidity monitoring
+- Switch-controlled relay toggle functionality (SW1-3 controls RELAY1-3)
+- Simple Serial debug output for monitoring (telemetry functions removed)
 
 **Key Features:**
 - Non-blocking event-driven architecture
@@ -20,8 +22,10 @@ The program is a comprehensive board test application that:
 - Shortened date format (DD/MM/YY) to save display space
 - Combined display of date, temperature, and humidity
 - Air quality monitoring with PM2.5, AQI, and quality description
-- Serial Monitor output every 3 seconds for remote monitoring
-- Graceful degradation when OLED is disconnected
+- Local DHT22 sensor readings with simulation fallback
+- Switch debouncing and toggle functionality for manual relay control
+- Simple Serial debug messages for system monitoring
+- Graceful degradation when OLED or sensors are disconnected
 
 ---
 
@@ -41,6 +45,7 @@ lib_deps =
   adafruit/Adafruit GFX Library
   adafruit/Adafruit SSD1306
   bblanchon/ArduinoJson@^6.19.4
+  adafruit/DHT sensor library
 ```
 
 ---
@@ -58,6 +63,7 @@ Include the necessary libraries:
 - `WiFi.h` and `WiFiClientSecure.h` - WiFi and HTTPS connectivity
 - `ArduinoJson.h` - JSON parsing for weather API
 - `time.h` - NTP time synchronization
+- `DHT.h` - DHT22 temperature and humidity sensor
 
 ### b. Pin Definitions
 
@@ -79,11 +85,14 @@ Define all GPIO pins used on the board:
 #define RL2_PIN 16  // RELAY2 (Active Low)
 #define RL3_PIN 4   // RELAY3 (Active Low)
 
+// DHT22 Temperature/Humidity Sensor
+#define DHT_PIN 13  // DHT22 Data Pin
+
 // Auxiliary TTL 3.3V Outputs
 #define AUX1_PIN 12
-#define AUX2_PIN 13
-#define AUX3_PIN 14
-#define AUX4_PIN 15
+#define AUX2_PIN 14
+#define AUX3_PIN 15
+#define AUX4_PIN 25
 ```
 
 ### c. Configuration Constants
@@ -128,13 +137,24 @@ const float NAKHON_SI_THAMMARAT_LON = 99.9631;  // Longitude
    - `test_step_timer` - Timer for test cycle
    - `test_interval_ms` - Interval between tests (1500ms)
 
-3. **Weather Data Variables:**
+5. **Weather Data Variables:**
    - `weather_update_timer` - Timer for weather updates
    - `weather_update_interval_ms` - Update interval (600000ms = 10 minutes)
    - `weather_data_valid` - Boolean flag for valid weather data
    - `weather_status` - String tracking weather fetch status
 
-4. **Weather Data Structure:**
+6. **DHT22 Sensor Variables:**
+   - `dht_temperature` - Current temperature from DHT22
+   - `dht_humidity` - Current humidity from DHT22
+   - `dht_last_read` - Timer for DHT22 reading interval
+   - `dht_read_interval` - Reading interval (2000ms minimum for DHT22)
+
+7. **Switch Control Variables:**
+   - `lastSwitchState[]` - Previous state for edge detection (SW1-3)
+   - `lastSwitchMillis[]` - Debounce timers for each switch
+   - `SWITCH_DEBOUNCE_MS` - Debounce time constant (50ms)
+
+8. **Weather Data Structure:**
 ```cpp
 struct CurrentWeather {
   String city_name;
@@ -145,13 +165,13 @@ struct CurrentWeather {
 };
 ```
 
-5. **Air Quality Data Variables:**
+9. **Air Quality Data Variables:**
    - `aqi_update_timer` - Timer for air quality updates
    - `aqi_update_interval_ms` - Update interval (600000ms = 10 minutes)
    - `aqi_data_valid` - Boolean flag for valid AQI data
    - `aqi_status` - String tracking AQI fetch status
 
-6. **Air Quality Data Structure:**
+10. **Air Quality Data Structure:**
 ```cpp
 struct AirQuality {
   int aqi;           // Air Quality Index (1-5)
@@ -161,23 +181,26 @@ struct AirQuality {
 };
 ```
 
-7. **Status Variables:**
+11. **Status Variables:**
    - `oled_available` - Boolean flag for OLED availability
    - `time_synced` - Boolean flag for NTP sync status
    - `wifi_status` - String for WiFi connection status
    - `wifi_ip` - String for IP address
    - `last_test_item`, `last_wifi_status` - For display optimization
+   - `last_debug_print` - Timer for periodic debug output (10 seconds)
 
 ### e. `setup()` Function
 
 The `setup()` function performs initialization in this order:
 
 1. **Serial Communication:** Initialize at 115200 baud for debugging
-2. **GPIO Initialization:**
+3. **GPIO Initialization:**
    - Set all output pins as OUTPUT
    - Initialize Relays to OFF state (HIGH for Active Low)
    - Initialize AUX outputs to LOW
    - Set all input pins as INPUT_PULLUP (for Active Low configuration)
+   - Initialize DHT22 sensor on GPIO 13
+   - Initialize switch debouncing arrays and relay state tracking
 3. **OLED Display:**
    - Attempt to initialize display
    - If failed: Set `oled_available = false`, blink LED 3 times, continue
@@ -202,19 +225,23 @@ Non-blocking event loop that performs:
      - Step 5: "-> AUX 3"
      - Step 6: "-> AUX 4"
 
-2. **WiFi Status Update:** Call `getWiFiStatus()` to get current WiFi info
+2. **Switch Handling:** Call `handleSwitches()` to process switch presses and toggle relays
 
-3. **Weather Data Update:**
+3. **DHT22 Sensor Reading:** Call `readDHT22Data()` to read temperature and humidity
+
+4. **WiFi Status Update:** Call `getWiFiStatus()` to get current WiFi info
+
+5. **Weather Data Update:**
    - Check if `weather_update_interval_ms` has elapsed
    - Call `fetchWeatherData()` to refresh weather data
 
-4. **Air Quality Data Update:**
+6. **Air Quality Data Update:**
    - Check if `aqi_update_interval_ms` has elapsed
    - Call `fetchAirQualityData()` to refresh air quality data
 
-5. **Display Update:** Call `updateOledDisplay()` with current status strings
+7. **Display Update:** Call `updateOledDisplay()` with current status strings
 
-6. **Small Delay:** `delay(10)` for stability
+8. **Small Delay:** `delay(10)` for stability
 
 ### g. Helper Functions
 
@@ -230,6 +257,21 @@ Non-blocking event loop that performs:
 #### `turnOffAllOutputs()`
 - Set RL1-3 to HIGH (Active Low - OFF)
 - Set AUX1-4 to LOW
+
+#### `handleSwitches()`
+- Read SW1-3 with debouncing (50ms debounce time)
+- Detect falling edge (press) for each switch
+- Toggle corresponding relay state (RELAY1-3)
+- Update physical relay outputs (Active Low)
+- Reset debounce timers after state changes
+
+#### `readDHT22Data()`
+- Read DHT22 sensor every 2 seconds minimum
+- Update global `dht_temperature` and `dht_humidity`
+- Provide simulated values if sensor not connected:
+  - Temperature: 25.0 + sin(millis()/10000.0) * 5.0 (20-30°C range)
+  - Humidity: 60.0 + cos(millis()/8000.0) * 15.0 (45-75% range)
+- Handle sensor read failures gracefully
 
 #### `readInputStates()`
 - Read all 5 inputs (SW1-3, ISOIN1-2)
@@ -291,18 +333,32 @@ Non-blocking event loop that performs:
 
 #### `updateOledDisplay(String test_item, String wifi_info)`
 - **Serial Monitor Output:**
-  - Print formatted status every 3 seconds or when data changes
+  - Print detailed status report every 10 seconds
   - Output format:
     ```
-    ========== Board Status ==========
-    Test: -> RELAY 1
-    Inputs: SW:000 ISO:00
-    WiFi: WiFi:-45dBm
-    Time: 14:30:25
-    Date: 16/10/25
-    Weather: 28C H75%
-    AirQuality: PM35 AQI2 Fair
-    ==================================
+    ╔════════════════════════════════════════════════╗
+    ║         ESP32 BOARD STATUS REPORT              ║
+    ╠════════════════════════════════════════════════╣
+    ║ Mode: AUTO | Uptime: 12345 sec
+    ║ WiFi: -45 dBm | IP: 192.168.1.100
+    ║ Debug: Serial Monitor Only
+    ╠════════════════════════════════════════════════╣
+    ║ OUTPUT STATES:
+    ║   Relay 1: ON  | Relay 2: OFF | Relay 3: OFF
+    ║   AUX 1: OFF | AUX 2: OFF | AUX 3: OFF | AUX 4: OFF
+    ║ INPUT STATES:
+    ║   SW1: RELEASED | SW2: RELEASED | SW3: RELEASED
+    ║   ISO1: INACTIVE | ISO2: INACTIVE
+    ╠════════════════════════════════════════════════╣
+    ║ WEATHER DATA:
+    ║   Temperature: 28°C | Humidity: 75%
+    ║   City: Tha Sala | Clear sky
+    ║ AIR QUALITY DATA:
+    ║   PM2.5: 35.0 µg/m³ | PM10: 45.0 µg/m³
+    ║   AQI: 2 (Fair)
+    ║ DHT22 SENSOR DATA:
+    ║   Temperature: 25.8°C | Humidity: 62.5%
+    ╚════════════════════════════════════════════════╝
     ```
 
 - **OLED Display Layout:**
@@ -310,10 +366,10 @@ Non-blocking event loop that performs:
   - Optimize: Only redraw if data changed or 1 second elapsed (for time updates)
   - **Line 1 (Size 2):** Test item name (e.g., "-> RELAY 1")
   - **Line 2:** Horizontal separator line
-  - **Line 3 (Size 1):** Input states "SW:XXX ISO:XX"
+  - **Line 3 (Size 1):** Input states and relay states "SW:XXX R:XXX"
   - **Line 4 (Size 1):** WiFi status + current time "WiFi:-45dBm HH:MM:SS"
-  - **Line 5 (Size 1):** Date + Temperature + Humidity "16/10/25 28C H75%"
-  - **Line 6 (Size 1):** Air Quality "PM35 AQI2 Fair" or error status "AQ:Timeout"
+  - **Line 5 (Size 1):** Date + DHT22 readings "16/10/25 DHT:25.8C 62%"
+  - **Line 6 (Size 1):** Weather + Air Quality "28C H75% PM35 AQI2"
 
 ---
 
@@ -357,18 +413,46 @@ Non-blocking event loop that performs:
 - AQI Scale: 1=Good, 2=Fair, 3=Moderate, 4=Poor, 5=VeryPoor
 - Follows WHO Air Quality Guidelines for PM2.5 monitoring
 
+### DHT22 Sensor Integration
+- Local temperature and humidity monitoring on GPIO 13
+- 2-second minimum reading interval for sensor stability
+- Simulated values when sensor not connected for development
+- Temperature simulation: 20-30°C sinusoidal variation
+- Humidity simulation: 45-75% cosine variation
+- Graceful fallback ensures system always has data
+
+### Switch-Controlled Relay Operation
+- SW1, SW2, SW3 control RELAY1, RELAY2, RELAY3 respectively
+- Debounced edge detection (50ms debounce time)
+- Toggle operation: each press toggles relay ON/OFF state
+- Independent operation alongside automatic test cycle
+- Real-time status display showing current relay states
+
 ### Display Optimization
 - Date format shortened from "Date: DD/MM/YYYY" to "DD/MM/YY" (saves 9 characters)
-- Line 5 combines date, temperature, and humidity on one line
-- Line 6 dedicated to air quality data (PM2.5 + AQI + description)
+- Line 5 combines date and DHT22 sensor readings
+- Line 6 combines weather data and air quality information
 - Efficient use of 128x64 OLED display space
+- Shows both relay states and switch states for manual control feedback
 
-### Serial Monitor Integration
+### Serial Debug Integration
 - 115200 baud for fast communication
-- Status output every 3 seconds
-- Formatted output for easy reading
-- Debug information for all major operations
-- Works independently of OLED status
+- Comprehensive status report every 10 seconds
+- Human-readable format for easy monitoring
+- Includes all sensor data, relay states, switch states, and system status
+- Real-time monitoring of DHT22 sensor readings
+- Individual action logging (switch presses, relay changes)
+- Works independently of OLED status for headless operation
+
+### System Architecture (Current)
+- **Standalone Operation:** No external cloud integrations (ThingsBoard/MQTT removed)
+- **Local Monitoring:** All status via Serial Monitor and OLED display
+- **Dual Mode Operation:**
+  - **AUTO Mode:** Automatic cycling through relay/AUX outputs every 1.5 seconds
+  - **MANUAL Mode:** Switch-controlled relay operation (SW1-3 → RELAY1-3)
+- **Sensor Integration:** Weather APIs, Air Quality APIs, and local DHT22 sensor
+- **Fault Tolerance:** Graceful degradation when sensors or display unavailable
+- **Memory Efficient:** Removed JSON serialization overhead for better performance
 
 ---
 
@@ -383,7 +467,10 @@ The program should:
 ✅ Connect to WiFi and maintain connection
 ✅ Sync time with NTP servers
 ✅ Fetch weather data from OpenWeatherMap
-✅ Output status to Serial Monitor every 3 seconds
+✅ Read DHT22 sensor data with simulation fallback
+✅ Handle switch-controlled relay toggles with debouncing
+✅ Output comprehensive debug status to Serial Monitor every 10 seconds
+✅ Log individual actions (switch presses, relay changes) in real-time
 ✅ Respond to input changes in real-time
 ✅ Handle all error conditions gracefully
 
@@ -399,7 +486,10 @@ The program should:
 6. **Check WiFi:** Confirm connection and RSSI display
 7. **Verify Time:** Check time updates every second
 8. **Monitor Weather:** Observe temperature and humidity updates
+9. **Test DHT22:** Check local temperature/humidity readings on GPIO 13
+10. **Test Switch Control:** Press SW1-3 to manually toggle RELAY1-3
+11. **Monitor Debug Output:** Check Serial output for comprehensive status reports and action logs
 
 ---
 
-*This blueprint represents the complete, production-ready ESPThaiTechZoneV2.0 board test program with WiFi, NTP, weather API integration, and full OLED fault tolerance.*
+*This blueprint represents the complete, production-ready ESPThaiTechZoneV2.0 board test program with WiFi, NTP, weather API integration, DHT22 sensor support, switch-controlled relay functionality, comprehensive Serial debug output, and full OLED fault tolerance.*

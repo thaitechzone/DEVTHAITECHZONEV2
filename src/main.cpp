@@ -6,6 +6,7 @@
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <time.h>
+#include <DHT.h>
 // PubSubClient (ThingsBoard) removed
 
 // ===== Pin Definitions =====
@@ -30,13 +31,16 @@
 #define AUX3_PIN 14
 #define AUX4_PIN 15
 
+// DHT22 Temperature & Humidity Sensor
+#define DHT_PIN 13        // DHT22 data pin
+#define DHT_TYPE DHT22    // DHT22 (AM2302)
+
 // ===== WiFi Configuration =====
 const char* WIFI_SSID = "myHome_2.4GHz";
 const char* WIFI_PASSWORD = "0939391546";
 
-// ===== MQTT Configuration (ThingsBoard) - REMOVED =====
-// ThingsBoard integration has been disabled in this build
-// All telemetry is now output to Serial monitor only
+// ===== Serial Configuration =====
+// All status data is output to Serial monitor at 115200 baud for debugging
 
 // ===== NTP Configuration =====
 const char* NTP_SERVER1 = "pool.ntp.org";
@@ -62,15 +66,18 @@ const float NAKHON_SI_THAMMARAT_LON = 99.9631;  // Longitude
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-// MQTT/ThingsBoard removed: using Serial-only telemetry
-WiFiClient espClient; // kept for potential HTTPS calls
+// DHT22 sensor initialization
+DHT dht(DHT_PIN, DHT_TYPE);
+
+// WiFi client for HTTPS calls (weather, air quality APIs)
+WiFiClient espClient;
 
 // ===== Global Variables for Test Cycle =====
 int current_test_step = 0;
 const int total_test_steps = 7;
 unsigned long test_step_timer = 0;
 const unsigned long test_interval_ms = 1500;
-bool auto_mode = true;  // Auto mode = cycling test, Manual mode = MQTT control
+bool auto_mode = true;  // Auto mode = cycling test, Manual mode = switch control
 
 // ===== Global Variables for Weather =====
 unsigned long weather_update_timer = 0;
@@ -105,6 +112,14 @@ struct AirQuality {
 
 AirQuality air_quality;
 
+// ===== Global Variables for DHT22 Sensor =====
+unsigned long dht_update_timer = 0;
+const unsigned long dht_update_interval_ms = 5000;  // Update every 5 seconds
+bool dht_data_valid = false;
+float dht_temperature = 0.0;
+float dht_humidity = 0.0;
+String dht_status = "Not read";
+
 // ===== Status Tracking for Display Optimization =====
 String last_test_item = "";
 String last_wifi_status = "";
@@ -115,13 +130,7 @@ String wifi_status = "Disconnected";
 String wifi_ip = "N/A";
 bool time_synced = false;
 
-// ===== MQTT Status Variables =====
-// MQTT removed; these variables are no longer used
-// bool mqtt_connected = false;
-unsigned long mqtt_reconnect_timer = 0;
-const unsigned long mqtt_reconnect_interval = 5000;
-unsigned long mqtt_publish_timer = 0;
-const unsigned long mqtt_publish_interval = 2000;  // Publish status every 2 seconds (เร็วขึ้น)
+// ===== Debug Print Variables =====
 unsigned long last_debug_print = 0;
 const unsigned long debug_print_interval = 10000;  // Debug print every 10 seconds
 
@@ -142,8 +151,7 @@ String getCurrentTime();
 void fetchWeatherData();
 void fetchAirQualityData();
 String getAQIQuality(int aqi);
-// MQTT removed - replaced by Serial telemetry
-void publishSerialStatus();
+void readDHT22Data();
 void setRelayState(int relay, bool state);
 void setAuxState(int aux, bool state);
 void handleSwitches();
@@ -182,7 +190,11 @@ void setup() {
   pinMode(ISOIN1_PIN, INPUT_PULLUP);
   pinMode(ISOIN2_PIN, INPUT_PULLUP);
   
-  // 4. Initialize OLED Display
+  // 4. Initialize DHT22 sensor
+  dht.begin();
+  Serial.println("DHT22 sensor initialized");
+  
+  // 5. Initialize OLED Display
   if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
     // OLED not available - continue without display
     oled_available = false;
@@ -210,26 +222,27 @@ void setup() {
     delay(2000);
   }
   
-  // 5. Connect to WiFi
+  // 6. Connect to WiFi
   connectWiFi();
   
-  // 6. Setup MQTT
-  // ThingsBoard/MQTT integration removed in this build
-  Serial.println("ThingsBoard/MQTT integration is disabled in this firmware.");
+  // 7. Serial debug setup
+  Serial.println("Serial debugging enabled (115200 baud)");
   
-  // 7. Sync Time with NTP Server
+  // 8. Sync Time with NTP Server and initialize data
   if(WiFi.status() == WL_CONNECTED) {
     syncNTPTime();
     fetchWeatherData();       // Fetch initial weather data
     fetchAirQualityData();    // Fetch initial air quality data
-    // ThingsBoard/MQTT connection removed
   }
+  
+  // Read initial DHT22 data
+  readDHT22Data();
   
   // Initialize timers
   test_step_timer = millis();
   weather_update_timer = millis();
   aqi_update_timer = millis();
-  mqtt_publish_timer = millis();
+  dht_update_timer = millis();
 }
 
 // ===== Main Loop =====
@@ -275,7 +288,7 @@ void loop() {
     return;
   }
   
-  // 1. MQTT/ThingsBoard removed - no connection maintenance
+  // 1. No external connection maintenance needed
 
   // 1.5 Handle physical switches (debounced toggles for RELAY1-3)
   handleSwitches();
@@ -315,16 +328,16 @@ void loop() {
     fetchAirQualityData();
   }
   
-  // 6. Publish Serial Status periodically (replacing MQTT telemetry)
-  if (millis() - mqtt_publish_timer >= mqtt_publish_interval) {
-    mqtt_publish_timer = millis();
-    publishSerialStatus();
+  // 6. Update DHT22 Data periodically
+  if (millis() - dht_update_timer >= dht_update_interval_ms) {
+    dht_update_timer = millis();
+    readDHT22Data();
   }
   
   // 7. Update OLED Display
   updateOledDisplay(current_test_name, wifi_info);
   
-  // Small delay for stability
+  // 8. Small delay for stability
   delay(10);
 }
 
@@ -835,11 +848,9 @@ void updateOledDisplay(String test_item, String wifi_info) {
     Serial.print(" dBm | IP: ");
     Serial.println(WiFi.localIP());
     
-  // MQTT Status
-  Serial.print("║ MQTT: ");
-  Serial.println("DISABLED in this build");
-    
-    Serial.println("╠════════════════════════════════════════════════╣");
+    // System Status
+    Serial.print("║ Debug: ");
+    Serial.println("Serial Monitor Only");    Serial.println("╠════════════════════════════════════════════════╣");
     
     // Output States
     Serial.println("║ OUTPUT STATES:");
@@ -910,6 +921,20 @@ void updateOledDisplay(String test_item, String wifi_info) {
       Serial.print("║   Status: ");
       Serial.print(aqi_status);
       Serial.println(" (Waiting for data...)");
+    }
+    
+    // DHT22 Sensor Data
+    Serial.println("║ DHT22 SENSOR DATA:");
+    if (dht_data_valid) {
+      Serial.print("║   Temperature: ");
+      Serial.print(dht_temperature, 1);
+      Serial.print("°C | Humidity: ");
+      Serial.print(dht_humidity, 1);
+      Serial.println("%");
+    } else {
+      Serial.print("║   Status: ");
+      Serial.print(dht_status);
+      Serial.println(" (Sensor error)");
     }
     
     Serial.println("╚════════════════════════════════════════════════╝\n");
@@ -999,82 +1024,50 @@ void updateOledDisplay(String test_item, String wifi_info) {
   display.display();
 }
 
-// ===== Helper Function: Connect to MQTT Broker (ThingsBoard) =====
-// connectMQTT removed - ThingsBoard integration disabled
-
-// ===== Helper Function: MQTT Callback for Incoming Messages (ThingsBoard RPC) =====
-// mqttCallback removed - ThingsBoard RPC not supported in this build
-
-// ===== Helper Function: Publish Serial Status (ThingsBoard removed) =====
-void publishSerialStatus() {
-  // ThingsBoard removed - always publish to Serial
+// ===== Helper Function: Read DHT22 Data =====
+void readDHT22Data() {
+  // Try to read real sensor data first
+  float temp = dht.readTemperature();
+  float humid = dht.readHumidity();
   
-  // Create telemetry JSON document with optimized size
-  DynamicJsonDocument doc(512);  // ลดขนาดลง เพราะไม่ส่ง Weather/AQI ตลอดเวลา
-  
-  // System information (ส่งเสมอ)
-  doc["uptime"] = millis() / 1000;
-  doc["mode"] = auto_mode ? "auto" : "manual";
-  doc["wifi_rssi"] = WiFi.RSSI();
-  doc["free_heap"] = ESP.getFreeHeap();
-  
-  // Relay States (Active Low - inverted for clarity)
-  doc["relay1"] = !digitalRead(RL1_PIN);
-  doc["relay2"] = !digitalRead(RL2_PIN);
-  doc["relay3"] = !digitalRead(RL3_PIN);
-  
-  // AUX States
-  doc["aux1"] = digitalRead(AUX1_PIN);
-  doc["aux2"] = digitalRead(AUX2_PIN);
-  doc["aux3"] = digitalRead(AUX3_PIN);
-  doc["aux4"] = digitalRead(AUX4_PIN);
-  
-  // Input States (Active Low - inverted)
-  doc["switch1"] = !digitalRead(SW1_PIN);
-  doc["switch2"] = !digitalRead(SW2_PIN);
-  doc["switch3"] = !digitalRead(SW3_PIN);
-  doc["iso_input1"] = !digitalRead(ISOIN1_PIN);
-  doc["iso_input2"] = !digitalRead(ISOIN2_PIN);
-  
-  // Weather Data - ส่งเฉพาะเมื่อมีข้อมูลจริง
-  if (weather_data_valid) {
-    doc["temperature"] = current_weather.temp_current;
-    doc["humidity"] = current_weather.humidity;
-    // ข้าม city และ description เพื่อลดขนาด JSON
+  // Check if readings are valid (not NaN)
+  if (isnan(temp) || isnan(humid)) {
+    // If sensor fails, use simulated values for demonstration
+    dht_data_valid = false;
+    dht_status = "Sensor error - using simulated data";
+    
+    // Generate simulated temperature (25-35°C with slight variation)
+    static float sim_temp = 28.5;
+    sim_temp += (random(-10, 11) / 10.0); // ±1°C variation
+    if (sim_temp < 25.0) sim_temp = 25.0;
+    if (sim_temp > 35.0) sim_temp = 35.0;
+    dht_temperature = sim_temp;
+    
+    // Generate simulated humidity (40-80% with variation)
+    static float sim_humid = 65.0;
+    sim_humid += (random(-20, 21) / 10.0); // ±2% variation
+    if (sim_humid < 40.0) sim_humid = 40.0;
+    if (sim_humid > 80.0) sim_humid = 80.0;
+    dht_humidity = sim_humid;
+    
+    Serial.println("DHT22: Using simulated data (sensor not connected)");
+  } else {
+    // Real sensor data is valid
+    dht_data_valid = true;
+    dht_status = "OK";
+    dht_temperature = temp;
+    dht_humidity = humid;
+    
+    Serial.print("DHT22: Real data - Temp: ");
+    Serial.print(dht_temperature, 1);
+    Serial.print("°C, Humidity: ");
+    Serial.print(dht_humidity, 1);
+    Serial.println("%");
   }
-  
-  // Air Quality Data - ส่งเฉพาะเมื่อมีข้อมูลจริง
-  if (aqi_data_valid) {
-    doc["pm2_5"] = air_quality.pm2_5;
-    doc["aqi"] = air_quality.aqi;
-    // ข้าม pm10 และ air_quality text เพื่อลดขนาด JSON
-  }
-  
-  // Check if JSON serialization is successful
-  if (doc.overflowed()) {
-    Serial.println("❌ JSON buffer overflow!");
-    return;
-  }
-  
-  // Serialize and print telemetry JSON to Serial (ThingsBoard removed)
-  String output;
-  size_t jsonSize = serializeJson(doc, output);
-
-  Serial.println("\n┌─────────────────────────────────────────────┐");
-  Serial.println("│       TELEMETRY (Serial Output)             │");
-  Serial.println("├─────────────────────────────────────────────┤");
-  Serial.print("│ JSON Size: ");
-  Serial.print(jsonSize);
-  Serial.println(" bytes");
-  Serial.print("│ Weather: ");
-  Serial.print(weather_data_valid ? "✓" : "✗");
-  Serial.print(" | AQI: ");
-  Serial.println(aqi_data_valid ? "✓" : "✗");
-  Serial.println("└─────────────────────────────────────────────┘");
-  Serial.print("Telemetry JSON: ");
-  Serial.println(output);
-  Serial.println();
 }
+
+// ===== External Integration Functions Removed =====
+// ThingsBoard/MQTT integration has been completely removed from this build
 
 // ===== Helper Function: Set Relay State =====
 void setRelayState(int relay, bool state) {
@@ -1093,17 +1086,6 @@ void setRelayState(int relay, bool state) {
   Serial.print(relay);
   Serial.print(" set to ");
   Serial.println(state ? "ON" : "OFF");
-  
-  // Send immediate telemetry update
-  DynamicJsonDocument doc(128);
-  String relayKey = "relay" + String(relay);
-  doc[relayKey] = state;
-  
-  String output;
-  serializeJson(doc, output);
-  // ThingsBoard removed - print to Serial instead
-  Serial.print("Relay telemetry (Serial): ");
-  Serial.println(output);
 }
 
 // ===== Helper Function: Set AUX State =====
@@ -1123,17 +1105,6 @@ void setAuxState(int aux, bool state) {
   Serial.print(aux);
   Serial.print(" set to ");
   Serial.println(state ? "ON" : "OFF");
-  
-  // Send immediate telemetry update
-  DynamicJsonDocument doc(128);
-  String auxKey = "aux" + String(aux);
-  doc[auxKey] = state;
-  
-  String output;
-  serializeJson(doc, output);
-  // ThingsBoard removed - print to Serial instead
-  Serial.print("AUX telemetry (Serial): ");
-  Serial.println(output);
 }
 
 // ===== Helper Function: Handle Switches (debounced toggle for Relays 1-3) =====
@@ -1167,15 +1138,6 @@ void handleSwitches() {
           Serial.print("SW"); Serial.print(i+1);
           Serial.print(" pressed -> Relay"); Serial.print(i+1);
           Serial.print(" set to "); Serial.println(newOn ? "ON" : "OFF");
-
-          // Print immediate telemetry to Serial (ThingsBoard removed)
-          DynamicJsonDocument doc(128);
-          String key = String("relay") + String(i+1);
-          doc[key] = newOn;
-          String out;
-          serializeJson(doc, out);
-          Serial.print("Switch telemetry (Serial): ");
-          Serial.println(out);
 
           processed[i] = true; // avoid retrigger until release
         }
