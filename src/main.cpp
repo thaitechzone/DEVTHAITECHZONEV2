@@ -30,7 +30,7 @@
 #define AUX4_PIN 15
 
 // ===== WiFi Configuration =====
-const char* WIFI_SSID = "Somporn2.4GHz";
+const char* WIFI_SSID = "Somporn-2.4GHz";
 const char* WIFI_PASSWORD = "0939391546";
 
 // ===== NTP Configuration =====
