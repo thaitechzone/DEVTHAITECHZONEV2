@@ -77,7 +77,7 @@ int current_test_step = 0;
 const int total_test_steps = 7;
 unsigned long test_step_timer = 0;
 const unsigned long test_interval_ms = 1500;
-bool auto_mode = true;  // Auto mode = cycling test, Manual mode = switch control
+bool auto_mode = false;  // Auto mode = cycling test, Manual mode = switch control (DISABLED for display only)
 
 // ===== Global Variables for Weather =====
 unsigned long weather_update_timer = 0;
@@ -134,13 +134,19 @@ bool time_synced = false;
 unsigned long last_debug_print = 0;
 const unsigned long debug_print_interval = 10000;  // Debug print every 10 seconds
 
+// ===== Display Page Variables =====
+int current_display_page = 0;  // 0=TEMP, 1=HUM, 2=AQI
+const int total_display_pages = 3;
+unsigned long display_page_timer = 0;
+const unsigned long display_page_interval = 4000;  // 4 seconds per page
+
 // ===== Switch debounce / toggle globals =====
 const unsigned long SWITCH_DEBOUNCE_MS = 50; // debounce window in milliseconds
 unsigned long lastSwitchMillis[3] = {0, 0, 0};
 bool lastSwitchState[3] = {HIGH, HIGH, HIGH}; // INPUT_PULLUP: HIGH = released
 
 // ===== Function Declarations =====
-void updateOledDisplay(String test_item, String wifi_info);
+void updateOledDisplay();
 void turnOffAllOutputs();
 void runTestCycle();
 String readInputStates();
@@ -243,101 +249,39 @@ void setup() {
   weather_update_timer = millis();
   aqi_update_timer = millis();
   dht_update_timer = millis();
+  display_page_timer = millis();
 }
 
 // ===== Main Loop =====
 void loop() {
-  static String current_test_name = "Initializing";
+  // Test cycle disabled - Display mode only
   
-  // 0. Startup sequence: Turn ON relays 1-3 for 3 seconds, then OFF for 3 seconds
-  static bool startup_sequence_done = false;
-  static unsigned long startup_timer = 0;
-  static int startup_phase = 0; // 0=start, 1=relays ON, 2=relays OFF, 3=done
-  
-  if (!startup_sequence_done) {
-    if (startup_phase == 0) {
-      // Start sequence - turn ON all relays (Active Low: LOW = ON)
-      digitalWrite(RL1_PIN, LOW);
-      digitalWrite(RL2_PIN, LOW);
-      digitalWrite(RL3_PIN, LOW);
-      startup_timer = millis();
-      startup_phase = 1;
-      current_test_name = "STARTUP: ON";
-      Serial.println("Startup: Relays 1-3 ON for 3 seconds");
-    } else if (startup_phase == 1 && (millis() - startup_timer >= 3000)) {
-      // After 3 seconds ON, turn OFF all relays (Active Low: HIGH = OFF)
-      digitalWrite(RL1_PIN, HIGH);
-      digitalWrite(RL2_PIN, HIGH);
-      digitalWrite(RL3_PIN, HIGH);
-      startup_timer = millis();
-      startup_phase = 2;
-      current_test_name = "STARTUP: OFF";
-      Serial.println("Startup: Relays 1-3 OFF for 3 seconds");
-    } else if (startup_phase == 2 && (millis() - startup_timer >= 3000)) {
-      // After 3 seconds OFF, startup sequence complete
-      startup_sequence_done = true;
-      startup_phase = 3;
-      current_test_name = "Initializing";
-      Serial.println("Startup sequence completed - normal operation begins");
-    }
-    
-    // During startup sequence, only update OLED and return early
-    String wifi_info = getWiFiStatus();
-    updateOledDisplay(current_test_name, wifi_info);
-    delay(10);
-    return;
-  }
-  
-  // 1. No external connection maintenance needed
-
-  // 1.5 Handle physical switches (debounced toggles for RELAY1-3)
+  // 1. Handle physical switches (debounced toggles for RELAY1-3)
   handleSwitches();
   
-  // 2. Automated Output Test Cycle (only in auto mode)
-  if (auto_mode) {
-    runTestCycle();
-    
-    // Update test name based on CURRENT active output (before incrementing)
-    // This ensures the display matches what's actually ON
-    switch(current_test_step) {
-      case 0: current_test_name = "-> RELAY 1"; break;
-      case 1: current_test_name = "-> RELAY 2"; break;
-      case 2: current_test_name = "-> RELAY 3"; break;
-      case 3: current_test_name = "-> AUX 1"; break;
-      case 4: current_test_name = "-> AUX 2"; break;
-      case 5: current_test_name = "-> AUX 3"; break;
-      case 6: current_test_name = "-> AUX 4"; break;
-      default: current_test_name = "-> ALL OFF"; break;
-    }
-  } else {
-    current_test_name = "MANUAL MODE";
-  }
   
-  // 3. Update WiFi Status
-  String wifi_info = getWiFiStatus();
-  
-  // 4. Update Weather Data periodically
+  // 2. Update Weather Data periodically
   if (millis() - weather_update_timer >= weather_update_interval_ms) {
     weather_update_timer = millis();
     fetchWeatherData();
   }
   
-  // 5. Update Air Quality Data periodically
+  // 3. Update Air Quality Data periodically
   if (millis() - aqi_update_timer >= aqi_update_interval_ms) {
     aqi_update_timer = millis();
     fetchAirQualityData();
   }
   
-  // 6. Update DHT22 Data periodically
+  // 4. Update DHT22 Data periodically
   if (millis() - dht_update_timer >= dht_update_interval_ms) {
     dht_update_timer = millis();
     readDHT22Data();
   }
   
-  // 7. Update OLED Display
-  updateOledDisplay(current_test_name, wifi_info);
+  // 5. Update OLED Display
+  updateOledDisplay();
   
-  // 8. Small delay for stability
+  // 6. Small delay for stability
   delay(10);
 }
 
@@ -816,16 +760,21 @@ String getAQIQuality(int aqi) {
 }
 
 // ===== Helper Function: Update OLED Display =====
-void updateOledDisplay(String test_item, String wifi_info) {
+void updateOledDisplay() {
   static unsigned long last_update = 0;
-  static String last_time_str = "";
-  String current_time_str = time_synced ? getCurrentTime() : "";
   
-  // Force update every second if time is synced, or when data changes
-  bool force_update = (time_synced && (millis() - last_update >= 1000));
-  bool data_changed = (test_item != last_test_item || 
-                       wifi_info != last_wifi_status ||
-                       current_time_str != last_time_str);
+  // Check if it's time to change page
+  if (millis() - display_page_timer >= display_page_interval) {
+    display_page_timer = millis();
+    current_display_page++;
+    if (current_display_page >= total_display_pages) {
+      current_display_page = 0;
+    }
+    last_update = 0;  // Force update on page change
+  }
+  
+  // Force update every 1 second or on page change
+  bool force_update = (millis() - last_update >= 1000);
   
   // Print debug info every 10 seconds (ไม่บ่อยเกินไป)
   if (millis() - last_debug_print >= debug_print_interval) {
@@ -945,79 +894,97 @@ void updateOledDisplay(String test_item, String wifi_info) {
     return;
   }
   
-  if(!force_update && !data_changed) {
+  if(!force_update) {
     return;  // No change, skip redraw
   }
   
-  last_test_item = test_item;
-  last_wifi_status = wifi_info;
-  last_time_str = current_time_str;
   last_update = millis();
   
   // Clear and redraw display
   display.clearDisplay();
   
-  // Line 1: Test Item Name (Large Text)
-  display.setTextSize(2);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0, 0);
-  display.println(test_item);
-  
-  // Line 2: Separator Line
-  display.drawLine(0, 18, SCREEN_WIDTH, 18, SSD1306_WHITE);
-  
-  // Line 3: Input States (Small Text)
-  display.setTextSize(1);
-  display.setCursor(0, 22);
-  String input_states = readInputStates();
-  display.println(input_states);
-  
-  // Line 4: WiFi Status and Time
-  display.setCursor(0, 32);
-  display.print(wifi_info);
-  display.print(" ");
-  if(time_synced) {
-    display.print(getCurrentTime());
-  }
-  
-  // Line 5: Date, Temperature and Humidity
-  display.setCursor(0, 42);
-  if(time_synced) {
-    struct tm timeinfo;
-    if(getLocalTime(&timeinfo)) {
-      display.printf("%02d/%02d/%02d", 
-                     timeinfo.tm_mday, 
-                     timeinfo.tm_mon + 1, 
-                     (timeinfo.tm_year + 1900) % 100);
-      
-      // Add weather data on same line if available
-      if(weather_data_valid) {
-        display.printf(" %dC H%d%%",
-            current_weather.temp_current, 
-            current_weather.humidity);
-      }
+  // Display different pages based on current_display_page
+  if (current_display_page == 0) {
+    // ===== PAGE 1: TEMPERATURE =====
+    display.setTextSize(2);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(5, 0);
+    display.println("TEMP");
+    display.drawLine(0, 18, SCREEN_WIDTH, 18, SSD1306_WHITE);
+    
+    // Large temperature value (centered)
+    display.setTextSize(4);
+    display.setCursor(15, 26);
+    if(dht_data_valid || dht_temperature > 0) {
+      display.print(dht_temperature, 1);
+    } else {
+      display.print("--.-");
     }
-  } else {
-    display.print("Time not synced");
-  }
-  
-  // Line 6: Air Quality Data with description
-  display.setCursor(0, 52);
-  if (aqi_data_valid) {
-    // Show PM2.5, AQI and quality description
-    display.printf("PM%.0f AQI%d %s",
-        air_quality.pm2_5,
-        air_quality.aqi,
-        air_quality.quality.c_str());
-  } else if (weather_data_valid && !time_synced) {
-    // Fallback: show weather if no time sync (shouldn't normally happen)
-    display.printf("%dC H%d%%",
-        current_weather.temp_current, 
-        current_weather.humidity);
-  } else {
-    // Show error status
-    display.print("AQI:");
-    display.print(aqi_status);
+    
+    // Degree symbol and C (medium size, bottom right)
+    display.setTextSize(2);
+    display.setCursor(105, 48);
+    display.print("o");
+    display.print("C");
+    
+  } else if (current_display_page == 1) {
+    // ===== PAGE 2: HUMIDITY =====
+    display.setTextSize(2);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(5, 0);
+    display.println("HUMID");
+    display.drawLine(0, 18, SCREEN_WIDTH, 18, SSD1306_WHITE);
+    
+    // Large humidity value (centered)
+    display.setTextSize(4);
+    display.setCursor(15, 26);
+    if(dht_data_valid || dht_humidity > 0) {
+      display.print(dht_humidity, 1);
+    } else {
+      display.print("--.-");
+    }
+    
+    // Percent symbol (medium size, bottom right)
+    display.setTextSize(2);
+    display.setCursor(108, 48);
+    display.print("%");
+    
+  } else if (current_display_page == 2) {
+    // ===== PAGE 3: AIR QUALITY =====
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(15, 0);
+    display.println("AIR QUALITY");
+    display.drawLine(0, 10, SCREEN_WIDTH, 10, SSD1306_WHITE);
+    
+    if (aqi_data_valid) {
+      // PM2.5 value
+      display.setTextSize(1);
+      display.setCursor(5, 16);
+      display.print("PM2.5:");
+      display.setTextSize(3);
+      display.setCursor(52, 13);
+      display.print(air_quality.pm2_5, 1);
+      
+      // AQI value (large)
+      display.setTextSize(1);
+      display.setCursor(5, 38);
+      display.print("AQI:");
+      display.setTextSize(3);
+      display.setCursor(52, 35);
+      display.print(air_quality.aqi);
+      
+      // Quality text (bottom)
+      display.setTextSize(1);
+      display.setCursor(5, 56);
+      display.print(air_quality.quality);
+    } else {
+      display.setTextSize(2);
+      display.setCursor(10, 24);
+      display.print("Waiting");
+      display.setCursor(15, 42);
+      display.print("data...");
+    }
   }
   
   // Update display
