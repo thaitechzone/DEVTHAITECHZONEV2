@@ -36,7 +36,7 @@
 #define DHT_TYPE DHT22    // DHT22 (AM2302)
 
 // ===== WiFi Configuration =====
-const char* WIFI_SSID = "myHome_2.4GHz";
+const char* WIFI_SSID = "Somporn-2.4GHz";
 const char* WIFI_PASSWORD = "0939391546";
 
 // ===== Serial Configuration =====
