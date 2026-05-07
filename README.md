@@ -1,6 +1,6 @@
-# ESPThaiTechZone V2.0
+# ESP32 Devkit V2
 
-โปรเจกต์ PlatformIO สำหรับบอร์ด ESP32/ESPThaiTechZone V2.0 ที่เชื่อมต่อ WiFi, MQTT, เวลา NTP, OpenWeatherMap Weather/Air Quality และแสดงสถานะหลักบน OLED SSD1306 128x64
+โปรเจกต์ PlatformIO สำหรับบอร์ด ESP32 Devkit V2 ที่เชื่อมต่อ WiFi, MQTT, เวลา NTP, OpenWeatherMap Weather/Air Quality และแสดงสถานะหลักบน OLED SSD1306 128x64
 
 ## สถานะระบบปัจจุบัน
 
@@ -8,7 +8,7 @@
 - Board: `esp32dev`
 - MQTT broker: `broker.hivemq.com:1883`
 - Board ID: `esp32-devkit-01`
-- Telemetry interval: ทุก 30 วินาที
+- Telemetry interval: ทุก 10 วินาที
 - Weather/AQI interval: ทุก 10 นาที
 - OLED: แสดง WiFi, MQTT, Relay 1-3, Weather, AQI, PM2.5 และสถานะ publish
 
@@ -111,7 +111,7 @@ WiFi:-54dBm     MQ:OK
 RLY:010 Topic:/relay
 T:29C H:74% AQI:2
 PM2.5:12
-PUB:30s
+PUB:10s
 ```
 
 Relay state ใช้ `1` = ON และ `0` = OFF

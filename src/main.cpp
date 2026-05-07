@@ -55,9 +55,15 @@ const float DEFAULT_WEATHER_LAT = 8.4304;   // Used when weather city lookup fai
 const float DEFAULT_WEATHER_LON = 99.9631;  // Used when weather city lookup fails
 
 // ===== MQTT Configuration =====
-const char* MQTT_BROKER = "broker.hivemq.com";  // HiveMQ free public broker
-const int MQTT_PORT = 1883;                      // MQTT port (non-TLS)
+const char* MQTT_BROKER = "192.168.1.6"; // Local MQTT broker host (Mosquitto Docker)
+const int MQTT_PORT = 1883;
+
+
+//const char* MQTT_BROKER = "broker.hivemq.com";  // HiveMQ free public broker
+//const int MQTT_PORT = 1883;                      // MQTT port (non-TLS)
 const char* MQTT_BOARD_ID = "esp32-devkit-01";  // Unique board identifier (change for each board)
+
+
 
 // Topic Structure:
 // - Telemetry: device/{boardID}/telemetry
@@ -77,10 +83,11 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 bool mqtt_connected = false;
+const int MQTT_BUFFER_SIZE = 1024;
 unsigned long mqtt_reconnect_timer = 0;
 const unsigned long mqtt_reconnect_interval_ms = 5000;  // Try to reconnect every 5 seconds
 unsigned long mqtt_publish_timer = 0;
-const unsigned long mqtt_publish_interval_ms = 30000;   // Publish telemetry every 30 seconds
+const unsigned long mqtt_publish_interval_ms = 10000;   // Publish telemetry every 10 seconds
 
 // ===== Global Variables for Test Cycle =====
 int current_test_step = 0;
@@ -228,6 +235,7 @@ void setup() {
     // 7. Initialize MQTT
     mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
     mqttClient.setCallback(mqttCallback);
+    mqttClient.setBufferSize(MQTT_BUFFER_SIZE);
     connectMQTT();
   }
   
@@ -817,6 +825,8 @@ void connectMQTT() {
     String status_topic = String("device/") + MQTT_BOARD_ID + "/status";
     String status_json = "{\"board_id\":\"" + String(MQTT_BOARD_ID) + "\",\"status\":\"online\"}";
     mqttClient.publish(status_topic.c_str(), status_json.c_str());
+    publishTelemetry();
+    mqtt_publish_timer = millis();
     
   } else {
     mqtt_connected = false;
@@ -941,7 +951,7 @@ void publishTelemetry() {
   }
   
   // Create telemetry JSON
-  DynamicJsonDocument doc(512);
+  DynamicJsonDocument doc(768);
   
   // Add air quality data
   if (aqi_data_valid) {
@@ -997,7 +1007,12 @@ void publishTelemetry() {
     Serial.print("Telemetry published: ");
     Serial.println(telemetry_json);
   } else {
-    Serial.println("Failed to publish telemetry");
+    Serial.print("Failed to publish telemetry, size=");
+    Serial.print(telemetry_json.length());
+    Serial.print(" bytes, buffer=");
+    Serial.print(MQTT_BUFFER_SIZE);
+    Serial.print(", mqtt_state=");
+    Serial.println(mqttClient.state());
   }
 }
 
@@ -1187,7 +1202,7 @@ void updateOledDisplay(String test_item, String wifi_info) {
 
   // Line 6: Telemetry and board status
   display.setCursor(0, 54);
-  display.print(mqtt_is_connected ? "PUB:30s" : "OFFLINE");
+  display.print(mqtt_is_connected ? "PUB:10s" : "OFFLINE");
   
   // Update display
   display.display();

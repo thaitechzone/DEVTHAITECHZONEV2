@@ -1,4 +1,4 @@
-# ESPThaiTechZone V2.0 Blueprint
+# ESP32 Devkit V2 Blueprint
 
 เอกสารนี้สรุปภาพรวม firmware ปัจจุบันของ `src/main.cpp`
 
@@ -11,7 +11,7 @@
 - Weather update ทุก 10 นาทีผ่าน OpenWeatherMap Current Weather API
 - AQI update ทุก 10 นาทีผ่าน OpenWeatherMap Air Pollution API
 - MQTT reconnect ทุก 5 วินาทีเมื่อหลุด
-- Telemetry publish ทุก 30 วินาที
+- Telemetry publish ทุก 10 วินาที
 - OLED refresh เมื่อข้อมูลสำคัญเปลี่ยน หรือทุก 1 วินาทีเมื่อมีเวลา NTP
 
 ## Libraries
@@ -113,7 +113,7 @@ WiFi:-54dBm     MQ:OK
 RLY:010 Topic:/relay
 T:29C H:74% AQI:2
 PM2.5:12
-PUB:30s
+PUB:10s
 ```
 
 ตัด AUX, Switch และ ISO input ออกจาก OLED แล้ว แต่ข้อมูล hardware เหล่านี้ยังอยู่ใน firmware สำหรับใช้งานต่อได้ในอนาคต

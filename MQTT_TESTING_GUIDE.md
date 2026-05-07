@@ -1,6 +1,6 @@
 # MQTT Testing Guide
 
-คู่มือทดสอบ MQTT สำหรับ ESP32 DevKit / ESPThaiTechZone V2.0 firmware ปัจจุบัน
+คู่มือทดสอบ MQTT สำหรับ ESP32 Devkit V2 firmware ปัจจุบัน
 
 ## Connection
 
@@ -174,7 +174,7 @@ device
 | ทดสอบ | วิธี | ผลที่คาดหวัง |
 |---|---|---|
 | MQTT connect | ดู Serial | เห็น `MQTT Connected!` |
-| Telemetry | Subscribe telemetry | ได้ JSON ทุก 30 วินาที |
+| Telemetry | Subscribe telemetry | ได้ JSON ทุก 10 วินาที |
 | Relay 1 ON/OFF | Publish topic relay/1 | Relay 1 เปลี่ยนสถานะและมี feedback |
 | Relay 2 ON/OFF | Publish topic relay/2 | Relay 2 เปลี่ยนสถานะและมี feedback |
 | Relay 3 ON/OFF | Publish topic relay/3 | Relay 3 เปลี่ยนสถานะและมี feedback |
@@ -187,6 +187,6 @@ device
 |---|---|
 | MQTT ไม่ต่อ | WiFi, port 1883, broker `broker.hivemq.com` |
 | Relay ไม่ตอบสนอง | Topic ต้องตรง, payload ต้องเป็นค่าที่รองรับ |
-| ไม่มี telemetry | MQTT connection, `mqttClient.loop()`, interval 30 วินาที |
+| ไม่มี telemetry | MQTT connection, `mqttClient.loop()`, interval 10 วินาที |
 | AQI ไม่มีข้อมูล | Weather API key, internet, fallback lat/lon |
 | OLED ไม่ขึ้น | I2C wiring, address `0x3C`; firmware ยังทำงานต่อได้ |
