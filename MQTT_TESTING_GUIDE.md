@@ -18,6 +18,39 @@
 - Mosquitto CLI: `mosquitto_sub`, `mosquitto_pub`
 - Node-RED MQTT nodes
 
+## MQTT Explorer Steps
+
+1. เปิด MQTT Explorer แล้วกด `+` เพื่อสร้าง connection ใหม่
+2. ตั้งค่า `Name` เป็น `HiveMQ Public`
+3. ตั้ง `Host` เป็น `broker.hivemq.com`
+4. ตั้ง `Port` เป็น `1883`
+5. ไม่ต้องใส่ Username และ Password
+6. กด Connect
+7. ดู topic tree ด้านซ้าย ควรเห็น `device/esp32-devkit-01/...` หลังบอร์ด online
+
+### ดู Telemetry ด้วย MQTT Explorer
+
+1. เลือก topic `device/esp32-devkit-01/telemetry`
+2. รอ payload JSON ล่าสุดจากบอร์ด
+3. ตรวจสอบค่า `aqi`, `temperature`, `humidity`, `relay1`, `relay2`, `relay3`
+4. ยืนยันว่า timestamp และ RSSI อัปเดตตามรอบ publish
+
+### สั่ง Relay ด้วย MQTT Explorer
+
+1. เลือก topic `device/esp32-devkit-01/control/relay/1`
+2. กดปุ่ม publish หรือ Add message
+3. ใส่ payload เป็น `true` แล้วส่ง
+4. ตรวจสอบว่า Relay 1 ทำงาน และมี feedback ที่ `device/esp32-devkit-01/relay/1/status`
+5. ทดสอบซ้ำด้วย payload `false`
+6. ทำซ้ำกับ relay `2`, `3` หรือ topic `device/esp32-devkit-01/control/relay/all`
+
+### ค่าที่ควรเห็นเมื่อทดสอบผ่าน MQTT Explorer
+
+- Topic `telemetry` มี JSON ใหม่ตามรอบเวลา
+- Topic `status` แสดง board online
+- Topic `relay/1/status`, `relay/2/status`, `relay/3/status` ตอบกลับหลังสั่งงาน
+- สถานะ relay บนจอ OLED และ Serial ตรงกับ MQTT
+
 ## Serial Check
 
 หลังบอร์ดต่อ WiFi และ MQTT สำเร็จ ควรเห็นข้อความประมาณนี้ใน Serial Monitor:
