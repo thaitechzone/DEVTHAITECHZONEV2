@@ -1,405 +1,151 @@
-# Blueprint for ESPThaiTechZoneV2.0 Board Test Program
+# ESPThaiTechZone V2.0 Blueprint
 
-Create a complete PlatformIO project for a custom ESP32 board named **ESPThaiTechZoneV2.0**.
+เอกสารนี้สรุปภาพรวม firmware ปัจจุบันของ `src/main.cpp`
 
-The program is a comprehensive board test application that:
-- Automatically cycles through testing all outputs (3 Relays and 4 Auxiliary TTL outputs)
-- Monitors 5 input states (3 toggle switches and 2 isolated inputs)
-- Connects to WiFi and displays connection status with RSSI
-- Synchronizes time using NTP servers (Bangkok GMT+7 timezone)
-- Fetches and displays current weather data from OpenWeatherMap API
-- Monitors air quality (PM2.5) using OpenWeatherMap Air Pollution API
-- Displays all information on an I2C OLED screen with optimized layout
-- Supports operation with or without OLED display connected
-- Outputs all status to Serial Monitor for debugging
+## Architecture
 
-**Key Features:**
-- Non-blocking event-driven architecture
-- Active Low configuration for all Relays (RL1-3) and Inputs (SW1-3, ISOIN1-2)
-- OLED display with optimized refresh to prevent flicker
-- Shortened date format (DD/MM/YY) to save display space
-- Combined display of date, temperature, and humidity
-- Air quality monitoring with PM2.5, AQI, and quality description
-- Serial Monitor output every 3 seconds for remote monitoring
-- Graceful degradation when OLED is disconnected
+โปรแกรมทำงานแบบ loop หลักบน Arduino framework โดยแบ่งงานตาม timer:
 
----
+- WiFi connection และ reconnect ผ่าน `connectWiFi()`
+- NTP sync สำหรับเวลา Bangkok GMT+7
+- Weather update ทุก 10 นาทีผ่าน OpenWeatherMap Current Weather API
+- AQI update ทุก 10 นาทีผ่าน OpenWeatherMap Air Pollution API
+- MQTT reconnect ทุก 5 วินาทีเมื่อหลุด
+- Telemetry publish ทุก 30 วินาที
+- OLED refresh เมื่อข้อมูลสำคัญเปลี่ยน หรือทุก 1 วินาทีเมื่อมีเวลา NTP
 
-## 1. Project Configuration (`platformio.ini`)
-
-Set up the `platformio.ini` file with the following configuration for an ESP32 Dev Module and include the necessary libraries.
+## Libraries
 
 ```ini
-[env:esp32dev]
-platform = espressif32
-board = esp32dev
-framework = arduino
-monitor_speed = 115200
-
-# Library dependencies
 lib_deps =
   adafruit/Adafruit GFX Library
   adafruit/Adafruit SSD1306
   bblanchon/ArduinoJson@^6.19.4
+  knolleary/PubSubClient@^2.8
 ```
 
----
-
-## 2. Main Source Code (`src/main.cpp`)
-
-Generate the C++ code for `src/main.cpp` based on the following detailed requirements.
-
-### a. Header Includes
-
-Include the necessary libraries:
-- `Arduino.h` - Core Arduino framework
-- `Wire.h` - I2C communication
-- `Adafruit_GFX.h` and `Adafruit_SSD1306.h` - OLED display
-- `WiFi.h` and `WiFiClientSecure.h` - WiFi and HTTPS connectivity
-- `ArduinoJson.h` - JSON parsing for weather API
-- `time.h` - NTP time synchronization
-
-### b. Pin Definitions
-
-Define all GPIO pins used on the board:
+## Pin Map
 
 ```cpp
-// Input Toggle Switches (Active Low)
 #define SW1_PIN 34
 #define SW2_PIN 35
 #define SW3_PIN 32
 
-// Isolated Inputs (Active Low)
 #define ISOIN1_PIN 33
 #define ISOIN2_PIN 27
 
-// Output Pins
 #define LED_PIN 2
-#define RL1_PIN 17  // RELAY1 (Active Low)
-#define RL2_PIN 16  // RELAY2 (Active Low)
-#define RL3_PIN 4   // RELAY3 (Active Low)
+#define RL1_PIN 17
+#define RL2_PIN 16
+#define RL3_PIN 4
 
-// Auxiliary TTL 3.3V Outputs
 #define AUX1_PIN 12
 #define AUX2_PIN 13
 #define AUX3_PIN 14
 #define AUX4_PIN 15
 ```
 
-### c. Configuration Constants
+Relay และ input เป็น Active Low:
 
-Define WiFi, NTP, and Weather API configuration:
+- Relay ON = `LOW`
+- Relay OFF = `HIGH`
+- Input active/pressed = `LOW`
+
+## Configuration
 
 ```cpp
-// WiFi Configuration
 const char* WIFI_SSID = "myHome_2.4GHz";
 const char* WIFI_PASSWORD = "0939391546";
 
-// NTP Configuration
-const char* NTP_SERVER1 = "pool.ntp.org";
-const char* NTP_SERVER2 = "time.nist.gov";
-const char* NTP_SERVER3 = "time.google.com";
-const long GMT_OFFSET_SEC = 7 * 3600;  // GMT+7 for Bangkok
-const int DAYLIGHT_OFFSET_SEC = 0;     // Thailand doesn't use DST
+const char* OPENWEATHERMAP_API_KEY = "...";
+const char* WEATHER_CITY = "Tha Sala,Nakhon Si Thammarat,TH";
 
-// Weather Configuration
-const char* OPENWEATHERMAP_API_KEY = "5285b3436c86bdab46069027fd961d09";
-const char* WEATHER_CITY = "Tha%20Sala,Nakhon%20Si%20Thammarat,TH";
-const char* OWM_HOST = "api.openweathermap.org";
-
-// Air Quality Configuration
-const float NAKHON_SI_THAMMARAT_LAT = 8.4304;   // Latitude
-const float NAKHON_SI_THAMMARAT_LON = 99.9631;  // Longitude
-
-// OLED Configuration
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-#define OLED_RESET -1
-#define SCREEN_ADDRESS 0x3C
+const char* MQTT_BROKER = "broker.hivemq.com";
+const int MQTT_PORT = 1883;
+const char* MQTT_BOARD_ID = "esp32-devkit-01";
 ```
 
-### d. Global Variables and Data Structures
+`WEATHER_CITY` เก็บเป็นข้อความปกติ และใช้ `encodeUrlSpaces()` แปลงช่องว่างเป็น `%20` เฉพาะตอนสร้าง URL
 
-1. **OLED Display Object:** `Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET)`
+## Weather And AQI Flow
 
-2. **Test Cycle Variables:**
-   - `current_test_step` - Current output being tested (0-6)
-   - `total_test_steps` - Total number of outputs to test (7)
-   - `test_step_timer` - Timer for test cycle
-   - `test_interval_ms` - Interval between tests (1500ms)
+1. `fetchWeatherData()` เรียก Current Weather API ด้วย `WEATHER_CITY`
+2. อ่านค่า `name`, `main.temp`, `main.humidity`, `weather[0].description`, `coord.lat`, `coord.lon`
+3. เก็บพิกัดใน `current_weather.latitude` และ `current_weather.longitude`
+4. `fetchAirQualityData()` ใช้พิกัดจาก weather เพื่อเรียก Air Pollution API
+5. ถ้า weather ยังไม่สำเร็จ จะใช้ `DEFAULT_WEATHER_LAT/LON` เป็น fallback
 
-3. **Weather Data Variables:**
-   - `weather_update_timer` - Timer for weather updates
-   - `weather_update_interval_ms` - Update interval (600000ms = 10 minutes)
-   - `weather_data_valid` - Boolean flag for valid weather data
-   - `weather_status` - String tracking weather fetch status
+## MQTT Flow
 
-4. **Weather Data Structure:**
-```cpp
-struct CurrentWeather {
-  String city_name;
-  String description;
-  int temp_current;
-  int humidity;
-  String icon_code;
-};
+เมื่อเชื่อมต่อ MQTT สำเร็จ โปรแกรม subscribe topic:
+
+```text
+device/{boardID}/control/relay/1
+device/{boardID}/control/relay/2
+device/{boardID}/control/relay/3
+device/{boardID}/control/relay/all
 ```
 
-5. **Air Quality Data Variables:**
-   - `aqi_update_timer` - Timer for air quality updates
-   - `aqi_update_interval_ms` - Update interval (600000ms = 10 minutes)
-   - `aqi_data_valid` - Boolean flag for valid AQI data
-   - `aqi_status` - String tracking AQI fetch status
+Command payload:
 
-6. **Air Quality Data Structure:**
-```cpp
-struct AirQuality {
-  int aqi;           // Air Quality Index (1-5)
-  float pm2_5;       // PM2.5 value
-  float pm10;        // PM10 value
-  String quality;    // Text description (Good, Fair, etc.)
-};
+```json
+{"state": true}
 ```
 
-7. **Status Variables:**
-   - `oled_available` - Boolean flag for OLED availability
-   - `time_synced` - Boolean flag for NTP sync status
-   - `wifi_status` - String for WiFi connection status
-   - `wifi_ip` - String for IP address
-   - `last_test_item`, `last_wifi_status` - For display optimization
+รองรับข้อความสั้น `true`, `false`, `on`, `off`, `1`, `0`
 
-### e. `setup()` Function
+Feedback:
 
-The `setup()` function performs initialization in this order:
+```text
+device/{boardID}/relay/1/status
+device/{boardID}/relay/2/status
+device/{boardID}/relay/3/status
+device/{boardID}/relay/all/status
+```
 
-1. **Serial Communication:** Initialize at 115200 baud for debugging
-2. **GPIO Initialization:**
-   - Set all output pins as OUTPUT
-   - Initialize Relays to OFF state (HIGH for Active Low)
-   - Initialize AUX outputs to LOW
-   - Set all input pins as INPUT_PULLUP (for Active Low configuration)
-3. **OLED Display:**
-   - Attempt to initialize display
-   - If failed: Set `oled_available = false`, blink LED 3 times, continue
-   - If successful: Display welcome message for 2 seconds
-4. **WiFi Connection:** Call `connectWiFi()` with visual feedback
-5. **NTP Time Sync:** Call `syncNTPTime()` if WiFi connected
-6. **Initial Data Fetch:** Call `fetchWeatherData()` and `fetchAirQualityData()` if WiFi connected
-7. **Initialize Timers:** Set `test_step_timer`, `weather_update_timer`, and `aqi_update_timer`
+## OLED Layout
 
-### f. `loop()` Function
+จอ OLED 128x64 แสดงเฉพาะข้อมูลที่ใช้งานจริง:
 
-Non-blocking event loop that performs:
+```text
+ESP32 MQTT      HH:MM
+WiFi:-54dBm     MQ:OK
+RLY:010 Topic:/relay
+T:29C H:74% AQI:2
+PM2.5:12
+PUB:30s
+```
 
-1. **Automated Output Test Cycle:**
-   - Call `runTestCycle()` to manage output testing
-   - Update `current_test_name` based on `current_test_step`:
-     - Step 0: "-> RELAY 1"
-     - Step 1: "-> RELAY 2"
-     - Step 2: "-> RELAY 3"
-     - Step 3: "-> AUX 1"
-     - Step 4: "-> AUX 2"
-     - Step 5: "-> AUX 3"
-     - Step 6: "-> AUX 4"
+ตัด AUX, Switch และ ISO input ออกจาก OLED แล้ว แต่ข้อมูล hardware เหล่านี้ยังอยู่ใน firmware สำหรับใช้งานต่อได้ในอนาคต
 
-2. **WiFi Status Update:** Call `getWiFiStatus()` to get current WiFi info
+## Telemetry
 
-3. **Weather Data Update:**
-   - Check if `weather_update_interval_ms` has elapsed
-   - Call `fetchWeatherData()` to refresh weather data
+Topic:
 
-4. **Air Quality Data Update:**
-   - Check if `aqi_update_interval_ms` has elapsed
-   - Call `fetchAirQualityData()` to refresh air quality data
+```text
+device/{boardID}/telemetry
+```
 
-5. **Display Update:** Call `updateOledDisplay()` with current status strings
+Fields หลัก:
 
-6. **Small Delay:** `delay(10)` for stability
+- `aqi`, `pm2_5`, `pm10`, `quality`
+- `temperature`, `humidity`
+- `weather_lat`, `weather_lon`
+- `relay1`, `relay2`, `relay3`
+- `timestamp`
+- `rssi`
+- `uptime_seconds`
 
-### g. Helper Functions
+## Build Verification
 
-#### `runTestCycle()`
-- Non-blocking timer-based function
-- Every `test_interval_ms`:
-  - Turn off all outputs via `turnOffAllOutputs()`
-  - Toggle LED to show activity
-  - Turn ON the specific output for current step (considering Active Low for relays)
-  - Increment `current_test_step` (wrap around at 7)
-- Ensures GPIO activation happens BEFORE display update
+คำสั่งตรวจสอบ:
 
-#### `turnOffAllOutputs()`
-- Set RL1-3 to HIGH (Active Low - OFF)
-- Set AUX1-4 to LOW
+```bash
+pio run
+```
 
-#### `readInputStates()`
-- Read all 5 inputs (SW1-3, ISOIN1-2)
-- Return formatted string: "SW:XXX ISO:XX"
-- Invert readings for Active Low (LOW = pressed/active = "1")
+หรือบนเครื่องนี้:
 
-#### `connectWiFi()`
-- Display connection status on OLED and Serial
-- Connect to WiFi with timeout (20 attempts)
-- Show IP address and RSSI on success
-- Handles gracefully if OLED not available
-
-#### `syncNTPTime()`
-- Configure NTP with GMT+7 timezone
-- Wait for time sync with timeout (10 seconds)
-- Display sync status on OLED and Serial
-- Set `time_synced` flag on success
-
-#### `getCurrentTime()`
-- Get local time from NTP
-- Return formatted string "HH:MM:SS"
-- Return "N/A" if not synced
-
-#### `getWiFiStatus()`
-- Check WiFi connection status
-- Return "WiFi:XXdBm" with RSSI if connected
-- Return "WiFi:DC" if disconnected
-
-#### `fetchWeatherData()`
-- HTTPS GET request to OpenWeatherMap Current Weather API 2.5
-- Uses WiFiClientSecure with `setInsecure()`
-- Proper HTTP header handling and status code checking
-- Parse JSON response using ArduinoJson
-- Extract: city_name, temp_current, humidity, description, icon_code
-- Update `weather_data_valid` and `weather_status` flags
-- Handle all error conditions with descriptive status messages
-
-#### `fetchAirQualityData()`
-- HTTPS GET request to OpenWeatherMap Air Pollution API 2.5
-- Uses same WiFiClientSecure connection and API key as weather
-- Request URL: `http://api.openweathermap.org/data/2.5/air_pollution?lat={LAT}&lon={LON}&appid={API_KEY}`
-- Parse JSON response to extract:
-  - `pm2_5`: PM2.5 concentration (µg/m³)
-  - `pm10`: PM10 concentration (µg/m³)
-  - `aqi`: Air Quality Index (1-5 scale)
-- Call `getAQIQuality()` to convert AQI to descriptive text
-- Update `aqi_data_valid` and `aqi_status` flags
-- Handle all error conditions with descriptive status messages
-
-#### `getAQIQuality(int aqi)`
-- Convert numeric AQI (1-5) to quality description
-- Return values:
-  - 1 → "Good"
-  - 2 → "Fair"
-  - 3 → "Moderate"
-  - 4 → "Poor"
-  - 5 → "VeryPoor"
-  - default → "Unknown"
-
-#### `updateOledDisplay(String test_item, String wifi_info)`
-- **Serial Monitor Output:**
-  - Print formatted status every 3 seconds or when data changes
-  - Output format:
-    ```
-    ========== Board Status ==========
-    Test: -> RELAY 1
-    Inputs: SW:000 ISO:00
-    WiFi: WiFi:-45dBm
-    Time: 14:30:25
-    Date: 16/10/25
-    Weather: 28C H75%
-    AirQuality: PM35 AQI2 Fair
-    ==================================
-    ```
-
-- **OLED Display Layout:**
-  - Skip if `oled_available == false`
-  - Optimize: Only redraw if data changed or 1 second elapsed (for time updates)
-  - **Line 1 (Size 2):** Test item name (e.g., "-> RELAY 1")
-  - **Line 2:** Horizontal separator line
-  - **Line 3 (Size 1):** Input states "SW:XXX ISO:XX"
-  - **Line 4 (Size 1):** WiFi status + current time "WiFi:-45dBm HH:MM:SS"
-  - **Line 5 (Size 1):** Date + Temperature + Humidity "16/10/25 28C H75%"
-  - **Line 6 (Size 1):** Air Quality "PM35 AQI2 Fair" or error status "AQ:Timeout"
-
----
-
-## 3. Key Implementation Details
-
-### Active Low Configuration
-- **Relays (RL1-3):** HIGH = OFF, LOW = ON
-- **Inputs (SW1-3, ISOIN1-2):** Use INPUT_PULLUP, LOW = pressed/active
-- Display shows inverted input values (LOW input shown as "1")
-
-### Non-Blocking Architecture
-- All timing uses `millis()` - no blocking delays in main loop
-- Multiple independent timers for different tasks
-- Event-driven updates only when necessary
-
-### OLED Fault Tolerance
-- Check `oled_available` before all display operations
-- Continue all functionality if OLED disconnects
-- LED blinks 3 times on startup if OLED not detected
-- All status mirrored to Serial Monitor
-
-### Display Optimization
-- Track previous display state to prevent unnecessary redraws
-- Force update every 1 second for time display
-- Immediate update when test step or data changes
-- Prevents screen flicker
-
-### Weather API Integration
-- HTTPS connection with proper certificate handling
-- Robust HTTP response parsing with status code checking
-- JSON parsing with error handling
-- 10-minute update interval to respect API rate limits
-- Displays current temperature and humidity only (accurate data)
-
-### Air Quality API Integration
-- HTTPS connection to OpenWeatherMap Air Pollution API 2.5
-- Uses same API key as weather service
-- Location: Nakhon Si Thammarat (8.4304°N, 99.9631°E)
-- 10-minute update interval (synchronized with weather updates)
-- Displays PM2.5, AQI (1-5 scale), and quality description
-- AQI Scale: 1=Good, 2=Fair, 3=Moderate, 4=Poor, 5=VeryPoor
-- Follows WHO Air Quality Guidelines for PM2.5 monitoring
-
-### Display Optimization
-- Date format shortened from "Date: DD/MM/YYYY" to "DD/MM/YY" (saves 9 characters)
-- Line 5 combines date, temperature, and humidity on one line
-- Line 6 dedicated to air quality data (PM2.5 + AQI + description)
-- Efficient use of 128x64 OLED display space
-
-### Serial Monitor Integration
-- 115200 baud for fast communication
-- Status output every 3 seconds
-- Formatted output for easy reading
-- Debug information for all major operations
-- Works independently of OLED status
-
----
-
-## 4. Testing and Validation
-
-The program should:
-✅ Compile without errors for ESP32
-✅ Cycle through all 7 outputs every 1.5 seconds
-✅ Correctly handle Active Low for relays and inputs
-✅ Display all information on OLED when available
-✅ Continue operation if OLED disconnects
-✅ Connect to WiFi and maintain connection
-✅ Sync time with NTP servers
-✅ Fetch weather data from OpenWeatherMap
-✅ Output status to Serial Monitor every 3 seconds
-✅ Respond to input changes in real-time
-✅ Handle all error conditions gracefully
-
----
-
-## 5. Usage Instructions
-
-1. **Upload to Board:** Use PlatformIO to compile and upload
-2. **Monitor Serial:** Open Serial Monitor at 115200 baud to see status
-3. **Observe OLED:** Check display for visual feedback (if connected)
-4. **Test Outputs:** Verify each relay and AUX activates in sequence
-5. **Test Inputs:** Toggle switches and verify display updates
-6. **Check WiFi:** Confirm connection and RSSI display
-7. **Verify Time:** Check time updates every second
-8. **Monitor Weather:** Observe temperature and humidity updates
-
----
-
-*This blueprint represents the complete, production-ready ESPThaiTechZoneV2.0 board test program with WiFi, NTP, weather API integration, and full OLED fault tolerance.*
+```powershell
+& $env:USERPROFILE\.platformio\penv\Scripts\platformio.exe run
+```
